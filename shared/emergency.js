@@ -26,6 +26,7 @@
   // The quick buttons. `required` narrows which hospitals are asked (only a
   // person's tap can narrow the list). `preferred` only changes the order.
   // `critical` = life-threatening: cost preference never delays anyone.
+    // [Divya's decision] EVERY button is treated as life-threatening.
   const EMERGENCY_TYPES = [
     { id: 'chest_pain',        label: 'Chest pain',      required: ['cardiac'],   preferred: ['cathlab', 'icu'],    critical: true },
     { id: 'cant_breathe',      label: "Can't breathe",    required: ['emergency'], preferred: ['icu'],               critical: true },
@@ -33,10 +34,10 @@
     { id: 'unconscious',       label: 'Unconscious / fainted',              required: ['emergency'], preferred: ['icu', 'neuro'],      critical: true },
     { id: 'seizure',           label: 'Fits / seizure',               required: ['neuro'],     preferred: ['icu'],               critical: true },
     { id: 'stroke_signs',      label: 'Stroke signs',      required: ['stroke'],    preferred: ['neuro', 'icu'],      critical: true },
-    { id: 'accident_fall',     label: 'Accident / fall',   required: ['trauma'],    preferred: ['orthopedic', 'icu'], critical: false },
-    { id: 'burns',             label: 'Burns',               required: ['burns'],     preferred: ['icu'],               critical: false },
+    { id: 'accident_fall',     label: 'Accident / fall',   required: ['trauma'],    preferred: ['orthopedic', 'icu'], critical: true },
+    { id: 'burns',             label: 'Burns',               required: ['burns'],     preferred: ['icu'],               critical: true },
     { id: 'allergic_reaction', label: 'Severe allergic reaction',       required: ['emergency'], preferred: ['icu'],               critical: true },
-    { id: 'child_emergency',   label: 'Child emergency',  required: ['pediatric'], preferred: [],                    critical: false },
+    { id: 'child_emergency',   label: 'Child emergency',  required: ['pediatric'], preferred: [],                    critical: true },
     { id: 'pregnancy',         label: 'Pregnancy emergency', required: ['maternity'], preferred: [],                    critical: true },
   ];
 
@@ -45,10 +46,8 @@
   const DECLINE_REASONS = [
     { id: 'no_specialist', label: 'No specialist on duty right now' },
     { id: 'no_icu_bed',    label: 'No ICU bed right now' },
-    { id: 'cathlab_busy',  label: 'Cath lab not available right now' },
     { id: 'er_full',       label: 'Emergency department full right now' },
     { id: 'better_nearby', label: 'A better-equipped hospital is nearer' },
-    { id: 'other',         label: 'Other' },
   ];
 
   const COST_PREFERENCES = [

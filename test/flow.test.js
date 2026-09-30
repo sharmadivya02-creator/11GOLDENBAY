@@ -262,14 +262,14 @@ function stream(ticket) {
     assert.equal(fv.log.filter((l) => l.tool === 'offer_declined').length, 2);
   });
 
-  await check('cost preference: not life-threatening → matching hospitals get a 1 s head start; others follow', async () => {
+  await check('cost preference never delays anyone: every button is life-threatening, so all capable hospitals are asked at once', async () => {
     const r = await api('POST', '/v1/emergencies', { profileId: 'demo-rajesh', patientConfirmed: true, types: ['accident_fall'], useDemoLocation: true }, fam());
     const ref = r.body.emergency.ref; await sleep(250);
     const has = async (h) => !!(await api('GET', '/v1/hospital/offers', null, H(h))).body.pending.find((x) => x.ref === ref);
-    assert.equal(await has('hosp-1'), true, 'private Sunrise asked first (family prefers private insurance)');
-    assert.equal(await has('hosp-2'), false, 'government Yamuna should wait for the head start');
-    await sleep(1200);
-    assert.equal(await has('hosp-2'), true, 'Yamuna asked after the head start');
+    assert.equal(await has('hosp-1'), true, 'private Sunrise asked');
+    assert.equal(await has('hosp-2'), true, 'government Yamuna asked at the same moment (no head start)');
+    assert.equal(r.body.emergency.urgency, 'CRITICAL');
+    await api('POST', `/v1/emergencies/${r.body.emergency.id}/cancel`, {}, fam());
   });
 
   await check('a hospital marked "temporarily unavailable" is not asked; the search widens at once', async () => {
