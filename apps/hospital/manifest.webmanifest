@@ -1,0 +1,11 @@
+{
+  "name": "GoldenBay Hospital",
+  "short_name": "GB Hospital",
+  "description": "Emergency requests for hospital staff. Demo login, made-up data.",
+  "start_url": "/hospital",
+  "scope": "/hospital",
+  "display": "standalone",
+  "background_color": "#f7f3ec",
+  "theme_color": "#f7f3ec",
+  "icons": [{ "src": "/common/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

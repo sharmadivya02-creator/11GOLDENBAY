@@ -19,7 +19,7 @@
     token: keep.get('gb_family_token'),
     family: null, me: null, members: [],
     profiles: [],
-    tab: 'sos',
+    tab: 'home', ai: 'rules',
     // emergency form
     patientId: null, picked: new Set(), text: '', useDemoLocation: true,
     // active emergency
@@ -30,13 +30,19 @@
   const $ = (s) => document.querySelector(s);
   const root = $('#app');
 
+  // ---- shared bits of the phone layout
+  const initials = (n) => String(n || '?').replace(/\s*\(DEMO\)\s*/i, '').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const header = () => `<div class="hdr"><div class="logo">${icon('heartPulse', { size: 26 })}</div>
+      <div class="grow"><div class="brand">GoldenBay</div><div class="tagline">Right hospital. Already prepared.</div></div>
+      <span class="pill ${S.ai === 'gemini' ? 'on' : ''}">${S.ai === 'gemini' ? '✦ Gemini' : 'Rules mode'}</span></div>`;
+  const banner = () => `<div class="demo-banner">${icon('alertTriangle', { size: 18 })}<span>Demo with synthetic data — not a real emergency service. In a real emergency in India, call <b>112</b>.</span></div>`;
+
   // =================================================================== sign in / join
   function showJoin(msg) {
     if (S.live) { S.live.stop(); S.live = null; }
-    root.innerHTML = `
-      <div class="topbar"><div><div class="brand">GoldenBay</div><div class="sub">The hospital knows before you arrive</div></div></div>
-      <div class="demo-banner">Prototype with made-up data only. Do not enter real medical details.</div>
-      <div class="shell">
+    root.innerHTML = `<div class="phone">
+      ${header()}${banner()}
+      <div class="pad">
         <div class="card stack" style="margin-top:18px">
           <h2>Join your family</h2>
           ${msg ? `<div class="note bad">${esc(msg)}</div>` : ''}
@@ -51,7 +57,7 @@
           <button class="btn tan" id="create">Create family</button>
           <p class="small muted">You get a code to share with relatives. Each phone gets its own secret key — nobody else's family can see your records.</p>
         </div>
-      </div>`;
+      </div></div>`;
     const go = async (p) => {
       try {
         const r = await api('POST', p.path, p.body);
@@ -79,6 +85,8 @@
       S.em = list.find((e) => ACTIVE.includes(e.status)) || null;
     } catch (e) { return e.status === 401 ? showJoin('Please join again.') : showJoin(e.message); }
     try { S.hospitals = (await api('GET', '/v1/hospitals/public')).hospitals; } catch { /* optional */ }
+    try { S.ai = (await api('GET', '/v1/health')).ai === 'gemini' ? 'gemini' : 'rules'; } catch { /* optional */ }
+    S.tab = S.em ? 'sos' : 'home';
     if (!S.patientId) S.patientId = (S.profiles.find((p) => p.id === S.me.profileId) || S.profiles[0] || {}).id || null;
     drawShell();
     if (!S.live) {
@@ -108,27 +116,78 @@
 
   // =================================================================== shell & tabs
   function drawShell() {
-    root.innerHTML = `
-      <div class="topbar">
-        <div class="grow"><div class="brand">GoldenBay</div><div class="sub" id="famline"></div></div>
-      </div>
-      <div class="demo-banner">Prototype · made-up data · hospitals shown are fictional pilot partners</div>
-      <div class="shell" id="tab"></div>
-      <a class="call112" href="tel:112">Call 112</a>
+    root.innerHTML = `<div class="phone">
+      ${header()}${banner()}
+      <div class="pad" id="tab"></div>
+      <a class="call112" href="tel:112">${icon('phone', { size: 18 })} Call 112</a>
       <div class="tabbar">
-        <button data-t="sos">Emergency</button><button data-t="profiles">Profiles</button><button data-t="family">Family</button>
-      </div>`;
-    document.querySelectorAll('.tabbar button').forEach((b) => b.onclick = () => { S.tab = b.dataset.t; drawTab(); });
+        <button data-t="home">${icon('home')}<span>Home</span></button>
+        <button data-t="profiles">${icon('users')}<span>Profiles</span></button>
+        <button data-t="sos">${icon('heartPulse')}<span>Emergency</span></button>
+        <button data-t="more">${icon('menu')}<span>More</span></button>
+      </div></div>`;
+    document.querySelectorAll('.tabbar button').forEach((b) => b.onclick = () => go(b.dataset.t));
     drawTab();
   }
 
+  function go(tab) { S.tab = tab; drawTab(); window.scrollTo({ top: 0 }); }
+
   function drawTab() {
     const el = $('#tab'); if (!el) return;
-    $('#famline').textContent = `${S.family.name} · ${S.me.label}`;
     document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('on', b.dataset.t === S.tab));
+    if (S.tab === 'home') return drawHome(el);
     if (S.tab === 'sos') return S.em ? drawActive(el) : drawSos(el);
     if (S.tab === 'profiles') return drawProfiles(el);
-    return drawFamily(el);
+    return drawMore(el);
+  }
+
+  // =================================================================== HOME
+  function drawHome(el) {
+    const now = new Date(), h = now.getHours();
+    const greet = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    const p = S.profiles.find((x) => x.id === S.patientId) || S.profiles[0];
+    const live = S.em && ACTIVE.includes(S.em.status);
+    el.innerHTML = `
+      <div style="margin-top:16px"><h1 class="h1">${greet}</h1>
+        <div class="date">${esc(now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }))}</div></div>
+      ${live ? `<button class="card row" id="liveBanner" style="width:100%;margin-top:14px;border:2px solid var(--crimson);text-align:left">
+          <span class="tag crit">IN PROGRESS</span><span class="grow"><b>${esc(S.em.patient.firstName)}'s emergency</b><br><span class="small muted">Tap to see where things stand</span></span>${icon('chevronRight')}</button>` : ''}
+      <div style="margin-top:16px"><button class="sos-card" id="sosGo">
+        <span class="ico">${icon('heartPulse', { size: 28 })}</span>
+        <span class="grow"><b>Emergency SOS</b><span class="s">Ask nearby hospitals — the one that says yes gets the details first</span></span>
+        ${icon('chevronRight')}</button></div>
+
+      <div class="section-head"><div class="section-title">Active profile</div><button class="link" id="switch">Switch</button></div>
+      ${p ? `<div class="card row" style="align-items:flex-start;gap:16px">
+          <div class="avatar big av${S.profiles.indexOf(p) % 4}">${esc(initials(p.fullName))}</div>
+          <div class="grow"><h3>${esc(p.fullName)}</h3><div class="small muted">${esc(p.relation || '')} · Age ${esc(p.age ?? '?')}</div>
+            <div style="margin-top:8px">${(p.allergies || []).map((a) => `<span class="chip need">${icon('alertTriangle', { size: 14 })}${esc(a)}</span>`).join('')}
+            ${(p.medications || []).slice(0, 1).map((m) => `<span class="chip">${icon('pill', { size: 14 })}${esc(m)}</span>`).join('')}</div></div></div>`
+        : '<div class="card muted">No profile yet — add one in the Profiles tab.</div>'}
+
+      <div class="section-head"><div class="section-title">Family</div><button class="link" id="seeAll">See all</button></div>
+      <div class="list">${S.profiles.slice(0, 4).map((x, i) => `
+        <button class="list-item" data-prof="${esc(x.id)}">
+          <div class="avatar av${i % 4}">${esc(initials(x.fullName))}</div>
+          <div><div class="name">${esc(x.fullName)}${x.id === S.patientId ? '<span class="badge-active">Active</span>' : ''}</div>
+            <div class="meta">${esc(x.relation || '')}, Age ${esc(x.age ?? '?')}</div></div>
+          <span class="chev">${icon('chevronRight')}</span></button>`).join('')}</div>`;
+    $('#sosGo').onclick = () => go('sos');
+    $('#seeAll').onclick = () => go('profiles');
+    $('#switch').onclick = chooseActive;
+    if ($('#liveBanner')) $('#liveBanner').onclick = () => go('sos');
+    el.querySelectorAll('[data-prof]').forEach((b) => b.onclick = () => { S.patientId = b.dataset.prof; go('profiles'); });
+  }
+
+  function chooseActive() {
+    const back = document.createElement('div'); back.className = 'sheet-back';
+    back.innerHTML = `<div class="sheet stack"><h2>Who is the active profile?</h2>
+      <p class="small muted">The Emergency tab starts with this person.</p>
+      <div class="list">${S.profiles.map((x, i) => `<button class="list-item" data-pick="${esc(x.id)}"><div class="avatar av${i % 4}">${esc(initials(x.fullName))}</div><div><div class="name">${esc(x.fullName)}</div><div class="meta">${esc(x.relation || '')}, Age ${esc(x.age ?? '?')}</div></div></button>`).join('')}</div>
+      <button class="btn ghost" id="close">Close</button></div>`;
+    document.body.appendChild(back);
+    $('#close').onclick = () => back.remove();
+    back.querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => { S.patientId = b.dataset.pick; back.remove(); drawTab(); });
   }
 
   function tickTimers() {
@@ -242,24 +301,24 @@
     } else if (e.status === 'NO_ACCEPT_YET') {
       box = `<div class="status-box dark"><h2>No hospital has said yes yet</h2>
         <p>${esc(e.fallback?.message || 'Call 112 now.')}</p>
-        <div class="row wrap" style="margin-top:12px"><a class="btn" style="background:#fff;color:var(--dark);text-align:center;text-decoration:none;width:auto" href="tel:112">Call 112</a>
-        ${e.fallback?.hospital?.navigateUrl ? `<a class="btn ghost" style="border-color:#fff;color:#fff;text-align:center;text-decoration:none;width:auto" target="_blank" rel="noopener" href="${esc(e.fallback.hospital.navigateUrl)}">Navigate to ${esc(e.fallback.hospital.name)}</a>` : ''}</div>
+        <div class="row wrap" style="margin-top:12px"><a class="btn white small" href="tel:112">Call 112</a>
+        ${e.fallback?.hospital?.navigateUrl ? `<a class="btn linew small" target="_blank" rel="noopener" href="${esc(e.fallback.hospital.navigateUrl)}">Navigate to ${esc(e.fallback.hospital.name)}</a>` : ''}</div>
         <p class="small" style="margin-top:10px">We keep asking in the background. If one says yes, this screen changes.</p></div>`;
     } else if (e.status === 'ACCEPTED') {
       const h = e.hospital;
       box = `<div class="status-box ok"><h2>✔ ${esc(h.name)} said yes</h2>
         <p>${e.timeToAcceptSec != null && e.timeToAcceptSec >= 1 ? 'Said yes in ' + esc(e.timeToAcceptSec) + ' seconds.' : 'Said yes right away.'} Their team can see ${esc(e.patient.firstName)}'s details now — go there.</p>
         <div class="row wrap" style="margin-top:12px">
-          <a class="btn" style="background:#fff;color:var(--ok);text-align:center;text-decoration:none;width:auto" target="_blank" rel="noopener" href="${esc(h.navigateUrl)}">Navigate</a>
-          <a class="btn ghost" style="border-color:#fff;color:#fff;text-align:center;text-decoration:none;width:auto" href="tel:${esc(h.phone)}">Call hospital</a></div></div>
+          <a class="btn white ok-t small" target="_blank" rel="noopener" href="${esc(h.navigateUrl)}">Navigate</a>
+          <a class="btn linew small" href="tel:${esc(h.phone)}">Call hospital</a></div></div>
         ${liveShareCard(h)}`;
     } else if (e.status === 'DIVERTED') {
       const d = e.divertedTo;
       box = d.joined
         ? `<div class="status-box ok"><h2>${esc(d.name)} has been alerted</h2><p>It is on GoldenBay, so it already has ${esc(e.patient.firstName)}'s details. It did not say yes in advance — please call to confirm.</p>
-           <div class="row wrap" style="margin-top:12px">${e.hospital ? `<a class="btn" style="background:#fff;color:var(--ok);text-align:center;text-decoration:none;width:auto" target="_blank" rel="noopener" href="${esc(e.hospital.navigateUrl)}">Navigate</a><a class="btn ghost" style="border-color:#fff;color:#fff;text-align:center;text-decoration:none;width:auto" href="tel:${esc(e.hospital.phone)}">Call hospital</a>` : ''}</div></div>${e.hospital ? liveShareCard(e.hospital) : ''}`
+           <div class="row wrap" style="margin-top:12px">${e.hospital ? `<a class="btn white ok-t small" target="_blank" rel="noopener" href="${esc(e.hospital.navigateUrl)}">Navigate</a><a class="btn linew small" href="tel:${esc(e.hospital.phone)}">Call hospital</a>` : ''}</div></div>${e.hospital ? liveShareCard(e.hospital) : ''}`
         : `<div class="status-box wait"><h2>${esc(d.name)} is not on GoldenBay</h2><p>We cannot send anything ahead. Show the doctor ${esc(e.patient.firstName)}'s details from this phone when you arrive.</p>
-           <button class="btn" style="background:#fff;color:var(--wait);margin-top:12px" id="doctor">Show to doctor</button></div>`;
+           <button class="btn white wait-t" style="margin-top:12px" id="doctor">Show to doctor</button></div>`;
     } else if (e.status === 'ARRIVED') {
       box = `<div class="status-box ok"><h2>Arrived</h2><p>${esc(e.hospital?.name || 'The hospital')} marked ${esc(e.patient.firstName)} as arrived. This case is closed.</p></div>`;
     } else {
@@ -471,14 +530,14 @@
   }
 
   // =================================================================== FAMILY
-  async function drawFamily(el) {
+  async function drawMore(el) {
     let notice = null; try { notice = await api('GET', '/v1/privacy/notice'); } catch { /* optional */ }
-    if (S.tab !== 'family') return;
+    if (S.tab !== 'more') return;
     el.innerHTML = `
-      <div class="section-title">Your family</div>
+      <div class="section-title" style="margin-top:16px">Your family</div>
       <div class="card stack">
         <h2>${esc(S.family.name)}</h2>
-        <div>Family code: <b style="font-size:22px;letter-spacing:.06em">${esc(S.family.joinCode)}</b></div>
+        <div class="small muted">This phone: ${esc(S.me.label)}</div><div>Family code: <b style="font-size:22px;letter-spacing:.06em">${esc(S.family.joinCode)}</b></div>
         <p class="small muted">Relatives use this code to join. Each phone gets its own secret key.</p>
         <div>${S.members.map((m) => `<span class="chip">${esc(m.label)}</span>`).join('')}</div>
       </div>

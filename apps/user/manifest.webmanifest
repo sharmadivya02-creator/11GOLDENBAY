@@ -1,0 +1,12 @@
+{
+  "name": "GoldenBay",
+  "short_name": "GoldenBay",
+  "description": "The hospital knows before you arrive. Prototype with made-up data.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f3ec",
+  "theme_color": "#f7f3ec",
+  "icons": [{ "src": "/common/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

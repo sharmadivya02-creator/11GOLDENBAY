@@ -37,7 +37,7 @@
     let hospitals = [];
     try { hospitals = (await api('GET', '/v1/hospitals/public')).hospitals.filter((h) => h.joined); } catch { /* shown below */ }
     root.innerHTML = `
-      <div class="topbar"><div><div class="brand">GoldenBay</div><div class="sub">Hospital App</div></div></div>
+      <div class="topbar"><div class="logo">${icon('hospital', { size: 22 })}</div><div><div class="brand">GoldenBay</div><div class="sub">Hospital App</div></div></div>
       <div class="demo-banner">Demo login — one shared PIN. Not real security. Hospitals shown are fictional pilot partners.</div>
       <div class="shell"><div class="card stack" style="margin-top:18px">
         <h2>Sign in to your emergency department</h2>
@@ -88,6 +88,7 @@
   function drawShell() {
     root.innerHTML = `
       <div class="topbar">
+        <div class="logo">${icon('hospital', { size: 22 })}</div>
         <div class="grow"><div class="brand" id="hname"></div><div class="sub">Hospital App · demo login · fictional hospital</div></div>
         <button id="settingsBtn">Services</button>
         <button id="out">Sign out</button>
@@ -105,7 +106,7 @@
   function drawHeader() {
     $('#hname').textContent = S.hospital.name;
     $('#banner').innerHTML = S.hospital.unavailable
-      ? `<div class="demo-banner" style="background:#f3e4b8">You are marked "temporarily unavailable" — new requests are not sent to you. ${esc(S.hospital.unavailableReason || '')}</div>`
+      ? `<div class="demo-banner">${icon('alertTriangle', { size: 18 })}<span>You are marked "temporarily unavailable" — new requests are not sent to you. ${esc(S.hospital.unavailableReason || '')}</span></div>`
       : '';
   }
 
