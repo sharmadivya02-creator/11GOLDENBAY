@@ -212,7 +212,7 @@ async function startEmergency({ member, profile, types, description, location })
   log(e, 'goal', {}, `Goal: get ${views.firstName(profile.fullName)} to a hospital that has said yes, with their details there before they arrive. Never leave the family waiting without a next step.`,
     `Looking for a hospital that will say yes for ${views.firstName(profile.fullName)}.`);
   if (masked.found.length) log(e, 'mask', { engine: masked.engine, removed: masked.found }, `Removed ${masked.found.join(', ')} from the caller's words before anything left the phone's family.`,
-    'Hid phone numbers and ID numbers from what you typed.');
+    'Phone numbers, ID numbers and emails in what you typed were hidden by our own rules. Names are not hidden.');
 
   startRound(e.id, 1);             // ask hospitals now — do not wait for the AI
   understand(e.id, profile);        // enrich in the background

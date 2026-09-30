@@ -1,6 +1,5 @@
-// gemini.test.js — proves the Phase E + F rules hold, using a FAKE Gemini and a
-// FAKE Presidio (so it runs without a key, without internet, and gives the
-// same answer every time). The fake Gemini deliberately answers with some
+// gemini.test.js — proves the Phase E + F rules hold, using a FAKE Gemini (so it
+// runs without a key, without internet, and gives the same answer every time). The fake Gemini deliberately answers with some
 // good items and some bad ones; the test checks the code keeps the good ones
 // and throws the bad ones away.
 //
@@ -41,16 +40,6 @@ const fake = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     res.setHeader('Content-Type', 'application/json');
-    // ---- fake Presidio
-    if (req.url === '/analyze') {
-      const { text } = JSON.parse(body);
-      const out = [];
-      const i = text.indexOf('Ramesh Kumar');
-      if (i >= 0) out.push({ entity_type: 'PERSON', start: i, end: i + 'Ramesh Kumar'.length, score: 0.85 });
-      const j = text.indexOf('10 minutes');
-      if (j >= 0) out.push({ entity_type: 'DATE_TIME', start: j, end: j + 10, score: 0.85 }); // must be KEPT
-      return res.end(JSON.stringify(out));
-    }
     // ---- fake Gemini
     geminiCalls++;
     geminiBodies.push(body);
@@ -89,7 +78,7 @@ const fake = http.createServer((req, res) => {
   const srv = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'index.js')], {
     env: {
       ...process.env, PORT: String(PORT), DATA_DIR, MOCK_AI: 'false', GEMINI_API_KEY: 'test-key-not-real',
-      GEMINI_BASE_URL: `http://localhost:${FAKE}`, PRESIDIO_URL: `http://localhost:${FAKE}`,
+      GEMINI_BASE_URL: `http://localhost:${FAKE}`,
       OFFER_ROUND_SECONDS: '30', DEMO_AUTO_ACCEPT_SECONDS: '0', HOSPITAL_DEMO_PIN: '2468',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -113,21 +102,22 @@ const fake = http.createServer((req, res) => {
   const fv = (await api('GET', `/v1/emergencies/${id}`, null, F)).body.emergency;
 
   results.push('\nPhase E — masking');
-  await check('Presidio (fake) hides the person\'s name; built-in rules still hide the phone number', async () => {
-    assert.ok(patient.callerWords.includes('[PERSON]'), patient.callerWords);
-    assert.ok(!patient.callerWords.includes('Ramesh'), 'name leaked');
+  await check('the phone number is hidden by the built-in rules', async () => {
     assert.ok(patient.callerWords.includes('[PHONE]') && !patient.callerWords.includes('9876543210'), 'phone leaked');
   });
   await check('times are kept for the doctor ("10 minutes" is not masked)', async () => {
     assert.ok(patient.callerWords.includes('10 minutes'), patient.callerWords);
   });
-  await check('the log says which engine really ran: presidio+builtin', async () => {
-    const m = fv.log.find((l) => l.tool === 'mask');
-    assert.equal(m.args.engine, 'presidio+builtin');
+  await check('KNOWN LIMIT, stated honestly: a name the family types is NOT hidden by the built-in rules', async () => {
+    assert.ok(patient.callerWords.includes('Ramesh'), 'if this fails, name-hiding was added: update the app wording');
   });
-  await check('nothing that identifies the family is ever sent to Gemini', async () => {
+  await check('the log says which engine ran: builtin', async () => {
+    const m = fv.log.find((l) => l.tool === 'mask');
+    assert.equal(m.args.engine, 'builtin');
+  });
+  await check('nothing from the saved profile (name, insurance, phone) and no typed phone number is ever sent to Gemini', async () => {
     const all = geminiBodies.join('\n');
-    for (const bad of ['Ramesh', '9876543210', 'Rajesh', 'Sharma', 'Star Health', '91700']) assert.ok(!all.includes(bad), `sent to Gemini: ${bad}`);
+    for (const bad of ['9876543210', 'Rajesh', 'Sharma', 'Star Health', '91700']) assert.ok(!all.includes(bad), `sent to Gemini: ${bad}`);
   });
 
   results.push('Phase F — Gemini proposes, code decides');

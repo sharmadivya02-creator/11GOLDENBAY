@@ -169,7 +169,7 @@ function status() {
       familyOnlyAccess: true,
       hospitalDetailsOnlyAfterAccept: true,
       whoViewedMyData: true,
-      maskingBeforeAiAndHospitals: 'built-in rules (Presidio in Phase E)',
+      maskingBeforeAiAndHospitals: 'built-in rules: phone numbers, ID numbers and emails are hidden; names are not',
       consentRecorded: true,
       rightToAccess: true,
       rightToErasure: true,

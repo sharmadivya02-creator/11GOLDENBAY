@@ -220,7 +220,7 @@
       <div class="section-title">3 · Anything else? (type or speak)</div>
       <div class="card stack">
         <textarea id="txt" maxlength="2000" placeholder="e.g. Papa has chest pain and is sweating">${esc(S.text)}</textarea>
-        <div class="row"><button class="btn tan small" id="mic">🎤 Speak</button><span class="small muted" id="micnote">Your words are masked (phone numbers, ID numbers, addresses) before anything is analysed.</span></div>
+        <div class="row"><button class="btn tan small" id="mic">🎤 Speak</button><span class="small muted" id="micnote">Phone numbers, ID numbers and emails are hidden before anything is analysed. Names are not — please avoid typing full names.</span></div>
       </div>
 
       <div class="section-title">Location</div>
@@ -774,6 +774,7 @@ button{font:inherit;background:#a61414;color:#fff;border:0;border-radius:12px;pa
       <div class="section-title">Privacy — plain facts</div>
       <div class="card stack">
         <div class="note">${esc(notice?.status?.claim || 'Prototype. Not compliant, not certified.')}</div>
+        <div class="note warn">In typed words, our own rules hide phone numbers, ID numbers and emails. Names are <b>not</b> hidden.</div>
         <p class="small"><b>Hospitals see first:</b> a no-name card — age range, what was reported, how far away.<br>
         <b>After a hospital says yes:</b> first name, allergies, medicines, conditions, blood group, a family contact.<br>
         <b>Never sent:</b> Aadhaar, PAN, home address, email, insurance details, document photos.</p>
