@@ -1,0 +1,12 @@
+{
+  "name": "11goldenbay",
+  "version": "0.2.0",
+  "description": "GoldenBay: the hospital knows who is coming before the patient arrives, and it is a hospital that already said yes. Hackathon prototype with synthetic data only.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node test/flow.test.js"
+  },
+  "engines": { "node": ">=18" }
+}

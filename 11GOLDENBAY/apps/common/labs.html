@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GoldenBay — Lab Reports</title>
+  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="/clinical.css" />
+  <style>
+    /* ---- Lab report reader ---------------------------------------------- */
+    .lab-wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 60px; }
+
+    .lab-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 18px 0 6px }
+    .lab-head h1 { margin: 0; font-size: 30px }
+    .lab-head p  { margin: 0; color: var(--muted); font-size: 14px }
+
+    /* the drop zone */
+    .drop {
+      border: 2px dashed var(--border-strong); border-radius: var(--radius-lg);
+      padding: 28px 20px; text-align: center; background: var(--surface);
+      transition: border-color .15s, background .15s;
+    }
+    .drop.over { border-color: var(--red); background: var(--red-soft) }
+    .drop h3   { margin: 0 0 6px; font-size: 17px }
+    .drop p    { margin: 0 0 14px; color: var(--muted); font-size: 13px }
+    .drop-row  { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap }
+
+    .btn-primary, .btn-ghost {
+      border: 0; border-radius: 999px; padding: 11px 20px;
+      font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
+    }
+    .btn-primary { background: var(--red); color: #fff }
+    .btn-ghost   { background: var(--surface-alt); color: var(--text); border: 1px solid var(--border) }
+    .btn-primary:disabled, .btn-ghost:disabled { opacity: .5; cursor: default }
+
+    /* the one sentence that matters */
+    .headline {
+      border-radius: var(--radius-lg); padding: 18px 20px; margin: 18px 0;
+      font-size: 19px; font-weight: 700; line-height: 1.4;
+      display: flex; gap: 12px; align-items: flex-start;
+    }
+    .headline .dot { font-size: 20px; line-height: 1.2 }
+    .headline.critical { background: #fdecef; color: #7c0d20; border: 1px solid #f3c2cb }
+    .headline.warn     { background: var(--amber-soft); color: #6b4a10; border: 1px solid #ecd6a8 }
+    .headline.good     { background: var(--green-soft); color: #1d5f3c; border: 1px solid #bfe3ce }
+
+    /* checks ticking through */
+    .ticker { background: var(--surface); border: 1px solid var(--border);
+              border-radius: var(--radius-md); padding: 14px 16px; margin: 14px 0; font-size: 14px }
+    .ticker .line { padding: 3px 0; color: var(--muted); opacity: 0; animation: fadeIn .25s forwards }
+    .ticker .line.done { color: var(--text) }
+    @keyframes fadeIn { to { opacity: 1 } }
+
+    /* chart */
+    .chart-card { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius-lg); padding: 18px 18px 10px; margin: 16px 0;
+                  box-shadow: var(--shadow-card) }
+    .chart-title { font-size: 17px; font-weight: 800; margin: 0 0 2px }
+    .chart-sub   { font-size: 13px; color: var(--muted); margin: 0 0 6px }
+    .chart-delta { font-size: 13px; font-weight: 700 }
+    .chart-delta.bad  { color: var(--red) }
+    .chart-delta.good { color: var(--green) }
+    .chart-svg   { width: 100%; height: auto; display: block; overflow: visible }
+
+    .chart-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px }
+    .chart-tab {
+      border: 1px solid var(--border); background: var(--surface-alt); color: var(--text-soft);
+      border-radius: 999px; padding: 6px 13px; font-size: 12.5px; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+    }
+    .chart-tab[aria-selected="true"] { background: var(--text); color: #fff; border-color: var(--text) }
+
+    /* values */
+    .val { background: var(--surface); border: 1px solid var(--border);
+           border-radius: var(--radius-md); padding: 13px 15px; margin-bottom: 9px }
+    .val-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
+    .val-name { font-weight: 700; font-size: 15px }
+    .val-num  { font-size: 19px; font-weight: 800; margin-left: auto }
+    .val-num.high, .val-num.low { color: var(--red) }
+    .val-num.critical-high, .val-num.critical-low { color: #fff; background: var(--red);
+      padding: 2px 10px; border-radius: 8px }
+    .val-meta { font-size: 12.5px; color: var(--muted); margin-top: 3px }
+    .val-means { font-size: 12.5px; color: var(--text-soft); margin-top: 4px; font-style: italic }
+
+    .conf { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; letter-spacing: .3px }
+    .conf.verified { background: var(--green-soft); color: #1d5f3c }
+    .conf.probable { background: var(--amber-soft); color: #6b4a10 }
+    .conf.rejected { background: #fdecef; color: #7c0d20 }
+
+    .checks { margin-top: 9px; border-top: 1px solid var(--border); padding-top: 8px; font-size: 12.5px }
+    .checks summary { cursor: pointer; color: var(--muted); font-weight: 600; user-select: none }
+    .check { display: flex; gap: 8px; padding: 3px 0 }
+    .check .m { width: 15px; flex: none; font-weight: 800 }
+    .check.pass .m { color: var(--green) }
+    .check.fail .m { color: var(--red) }
+    .check.skip .m { color: var(--muted) }
+    .check .d { color: var(--text-soft) }
+
+    /* the refusal — the most important block on the page */
+    .refused { background: #fff; border: 2px solid var(--border-strong); border-left: 4px solid var(--muted);
+               border-radius: var(--radius-md); padding: 13px 15px; margin-bottom: 9px }
+    .refused .why { font-size: 13px; color: var(--text-soft); margin-top: 4px }
+    .refused strong { display: block; margin-top: 6px; color: var(--text) }
+
+    .flag { background: #fdecef; border: 1px solid #f3c2cb; border-radius: var(--radius-md);
+            padding: 13px 15px; margin-bottom: 9px }
+    .flag .risk { font-weight: 700; color: #7c0d20 }
+    .flag .action { font-size: 13.5px; margin-top: 4px; color: #7c0d20 }
+    .flag .meds { font-size: 12px; color: var(--muted); margin-top: 5px }
+
+    .issue { border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 8px; font-size: 14px }
+    .issue.stop { background: #fdecef; color: #7c0d20; border: 1px solid #f3c2cb; font-weight: 600 }
+    .issue.warn { background: var(--amber-soft); color: #6b4a10; border: 1px solid #ecd6a8 }
+
+    h2.sec { font-size: 13px; text-transform: uppercase; letter-spacing: 1px;
+             color: var(--muted); margin: 26px 0 10px }
+
+    .tally { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 2px }
+    .tally span { font-size: 12px; background: var(--surface-alt); border: 1px solid var(--border);
+                  padding: 4px 11px; border-radius: 999px; color: var(--text-soft) }
+
+    .hidden { display: none !important }
+    select { font-family: inherit; font-size: 14px; padding: 8px 12px;
+             border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface) }
+
+    /* ---- PHONE ------------------------------------------------------------
+       This page is used by a family member reading their father's reports.
+       That happens on a phone far more often than on a laptop, so everything
+       below has to work at 360px before it works anywhere else. */
+    @media (max-width: 640px) {
+      .lab-wrap   { padding: 0 14px 50px }
+      .lab-head   { margin: 14px 0 4px; gap: 8px }
+      .lab-head h1 { font-size: 25px; width: 100% }
+      .lab-head p  { width: 100%; margin-bottom: 4px }
+      .lab-head > div { margin-left: 0 !important; width: 100% }
+      select      { width: 100% }
+
+      .drop       { padding: 20px 14px }
+      .drop-row   { flex-direction: column }
+      .btn-primary, .btn-ghost { width: 100% }
+
+      .headline   { font-size: 16.5px; padding: 15px 16px; border-radius: 16px }
+
+      .chart-card { padding: 14px 12px 8px; border-radius: 16px }
+
+      /* name on one line, the number on its own line underneath — at 360px
+         they collide if they share a row */
+      .val-top    { flex-wrap: wrap }
+      .val-name   { width: 100%; font-size: 16px }
+      .val-num    { margin-left: 0; font-size: 22px }
+      .conf       { order: 3 }
+
+      .checks summary { padding: 6px 0 }   /* a finger-sized tap target */
+      .tally span { font-size: 11.5px }
+    }
+
+    /* very small phones */
+    @media (max-width: 380px) {
+      .lab-head h1 { font-size: 22px }
+      .headline    { font-size: 15.5px }
+    }
+  </style>
+</head>
+<body>
+  <div class="lab-wrap">
+    <div class="demo-banner">⚠️ DEMO — synthetic data. GoldenBay checks what a report says against reference tables. It does not diagnose.</div>
+
+    <div class="lab-head">
+      <h1>Lab Reports</h1>
+      <p>Read, verified, and put side by side.</p>
+      <div style="margin-left:auto"><select id="who"></select></div>
+    </div>
+
+    <div class="drop" id="drop">
+      <h3>Drop a lab report here</h3>
+      <p>Photo or scan. We read it, then check every number against reference tables.</p>
+      <div class="drop-row">
+        <button class="btn-primary" id="btnPick">Choose a report</button>
+        <button class="btn-ghost" id="btnHistory">Load 18 months of history</button>
+      </div>
+      <input type="file" id="file" accept="image/*" class="hidden" />
+    </div>
+
+    <div id="ticker" class="ticker hidden"></div>
+    <div id="out"></div>
+
+    <p class="footer-note">GoldenBay hackathon prototype · synthetic data only · AI organises and checks information, it does not diagnose</p>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="labs.js"></script>
+</body>
+</html>

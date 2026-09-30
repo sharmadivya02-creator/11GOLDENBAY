@@ -1,0 +1,223 @@
+/* ===========================================================================
+   clinical.css — GoldenBay's shape language.
+
+   Loaded AFTER app.css so it overrides it.
+
+   THE IDEA
+   Medical records are printed things: ruled, stamped, squared off, with
+   numbers in a typewriter face so columns line up. This stylesheet leans into
+   that instead of the default soft-rounded-card-with-a-drop-shadow look.
+
+   THE RULES
+     1. Corners are 3px, not 18px. Square says instrument; round says app.
+     2. No drop shadows. Structure comes from 1px rules, like a form.
+     3. Every number is monospace and tabular, so digits sit in columns.
+     4. Status is a STAMP — a bordered rectangle in small caps — not a pill.
+     5. Important things get a 3px spine down their left edge, like a file tab.
+     6. Section headings are small, letterspaced, and carry a rule across.
+     7. One accent colour used as a solid block, never as a gradient.
+   =========================================================================== */
+
+:root {
+  --edge: 3px;                       /* the corner radius for everything */
+  --rule: #ddd5cc;                   /* hairline */
+  --rule-soft: #eae4dd;
+  --ink: #201a17;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+/* --- kill the roundness and the shadows ---------------------------------- */
+.card, .val, .refused, .flag, .issue, .pv-card, .chart-card, .drop,
+.headline, .ticker, .bay-card, .bay-hero, .feed, .mrow, .drow, .mlist {
+  border-radius: var(--edge) !important;
+  box-shadow: none !important;
+}
+
+.card, .val, .pv-card, .chart-card, .ticker {
+  border: 1px solid var(--rule);
+}
+
+/* --- every number is monospace and tabular ------------------------------- */
+.val-num, .chart-delta, .vital__num, .feed__rate, .conf, .tally span,
+.big-eta, #rate, .agent-n, .agent-args {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* --- STAMPS, not pills --------------------------------------------------- */
+.conf, .badge, .tally span, .chart-tab, .feed__tag, .feed__chip, .scene__chip {
+  border-radius: 0 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 10px !important;
+  font-weight: 700;
+  padding: 4px 8px !important;
+  border: 1px solid currentColor;
+  background: transparent !important;
+}
+.conf.verified { color: #1d5f3c }
+.conf.probable { color: #7a5410 }
+.conf.rejected { color: #7c0d20 }
+
+/* the one exception — critical is a solid block, because it should shout */
+.badge.CRITICAL, .conf.critical {
+  background: var(--red) !important;
+  color: #fff !important;
+  border-color: var(--red);
+}
+
+/* --- section headings carry a rule --------------------------------------- */
+h2.sec, .section-head h2, .pv h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+h2.sec::after, .section-head h2::after, .pv h2::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule-soft);
+}
+
+/* --- the spine: a file-tab edge on things that matter -------------------- */
+.headline, .flag, .refused, .issue.stop, .bay-hero {
+  border-left-width: 3px !important;
+  border-left-style: solid !important;
+}
+.headline.critical, .flag, .issue.stop { border-left-color: var(--red) !important }
+.headline.warn  { border-left-color: var(--gold) !important }
+.headline.good  { border-left-color: var(--green) !important }
+.refused        { border-left-color: var(--ink) !important }
+
+/* headlines lose the tinted blob, keep the rule */
+.headline {
+  background: var(--surface) !important;
+  border: 1px solid var(--rule) !important;
+  font-size: 17px;
+  padding: 16px 18px;
+}
+.headline .dot { display: none }              /* no emoji — the spine says it */
+.headline.critical { color: #7c0d20 }
+.headline.warn     { color: #6b4a10 }
+.headline.good     { color: #1d5f3c }
+
+/* --- lab values read like a printed results table ------------------------ */
+.val {
+  border-left: 3px solid transparent;
+  padding: 12px 14px;
+}
+.val:has(.val-num.high), .val:has(.val-num.low) { border-left-color: var(--gold) }
+.val:has(.val-num.critical-high), .val:has(.val-num.critical-low) { border-left-color: var(--red) }
+
+.val-name { letter-spacing: -0.01em }
+.val-num  { font-size: 21px }
+.val-num.critical-high, .val-num.critical-low {
+  background: var(--red); color: #fff; border-radius: 0; padding: 2px 8px;
+}
+.val-meta { font-family: var(--mono); font-size: 11px; letter-spacing: -0.01em }
+.val-means { font-style: normal; color: var(--muted) }
+
+/* the refusal is the most important block — give it a hatched edge */
+.refused {
+  background:
+    repeating-linear-gradient(45deg, transparent 0 6px, rgba(32,26,23,.05) 6px 7px)
+    left / 22px 100% no-repeat,
+    var(--surface);
+  padding-left: 30px;
+}
+.refused strong { font-family: var(--mono); font-size: 12px; letter-spacing: 0 }
+
+/* --- chart card ---------------------------------------------------------- */
+.chart-card { padding: 16px }
+.chart-title { font-size: 15px; letter-spacing: -0.01em }
+.chart-tab[aria-selected="true"] {
+  background: var(--ink) !important;
+  color: #fff !important;
+  border-color: var(--ink);
+}
+
+/* --- drop zone: a form field, not a cloud -------------------------------- */
+.drop { border: 1px dashed var(--rule); background: var(--surface-alt) }
+.drop h3 { font-size: 15px; letter-spacing: -0.01em }
+.btn-primary, .btn-ghost {
+  border-radius: var(--edge);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11.5px;
+  padding: 12px 18px;
+}
+.btn-primary { background: var(--red) }
+.btn-ghost { border: 1px solid var(--rule) }
+
+/* --- the ticker looks like a terminal ------------------------------------ */
+.ticker { font-family: var(--mono); font-size: 12px; background: var(--surface-alt) }
+
+/* --- privacy rows -------------------------------------------------------- */
+.pv-card { padding: 13px 15px }
+.row .mk { font-family: var(--mono) }
+.honest { border-radius: var(--edge); border-left: 3px solid var(--gold) }
+
+/* ===========================================================================
+   DARK SURFACES — the emergency screen, the agent log, the bay hero
+   =========================================================================== */
+
+.emg-live .card, .bay-hero, .agent-card {
+  border-radius: var(--edge) !important;
+  box-shadow: none !important;
+}
+
+/* agent log as an instrument readout */
+.agent-card h3 { letter-spacing: 0.16em; font-size: 10.5px; text-transform: uppercase }
+.agent-log { font-family: var(--mono); font-size: 12px }
+.agent-step { border-top: 1px solid rgba(255,255,255,.09) }
+.agent-n {
+  border-radius: 0; background: transparent;
+  border: 1px solid rgba(255,255,255,.25); font-size: 10px;
+}
+.agent-tool { letter-spacing: 0 }
+.agent-why  { font-family: inherit; font-size: 12.5px }
+.agent-step.reroute {
+  border-radius: 0; border-left: 3px solid #ff4d4d;
+  background: rgba(255,77,77,.1); padding-left: 10px;
+}
+.agent-demo-row button {
+  border-radius: var(--edge); text-transform: uppercase;
+  letter-spacing: 0.08em; font-size: 10.5px;
+}
+
+/* the bay hero: an instrument panel */
+.bay-hero__alert {
+  letter-spacing: 0.18em; font-size: 11px; border-radius: 0;
+}
+.vital { border-radius: 0; border: 1px solid rgba(255,255,255,.12); background: transparent }
+.vital__num { letter-spacing: -0.03em }
+.vital__lbl { text-transform: uppercase; letter-spacing: 0.1em; font-size: 9px }
+.feed { border-radius: var(--edge) }
+.feed__tag { border-radius: 0 }
+.bay-hero__scene { border-radius: var(--edge); background: rgba(255,255,255,.04) }
+.scene__tag { text-transform: uppercase; letter-spacing: 0.14em; font-size: 9.5px }
+
+/* the co-pilot ring stays round — it's a dial, and dials are round */
+#ring { border-radius: 50% !important }
+#coach {
+  border-radius: var(--edge);
+  letter-spacing: -0.01em;
+}
+#stats span { border-radius: 0; border: 1px solid rgba(255,255,255,.2); background: transparent }
+
+/* --- tab bar & rows: rules, not cards ------------------------------------ */
+.mlist { border: 1px solid var(--rule); overflow: hidden }
+.mrow, .drow { border-radius: 0 !important; border-bottom: 1px solid var(--rule-soft) }
+.mrow:last-child, .drow:last-child { border-bottom: 0 }
+
+/* --- demo banner reads like a rubber stamp ------------------------------- */
+.demo-banner {
+  border-radius: var(--edge);
+  border-left: 3px solid var(--gold);
+  font-size: 12.5px;
+}
