@@ -16,14 +16,14 @@ const ai = require('./ai');
 const { mask } = require('./mask');
 const { distanceKm, round1 } = require('./geo');
 const views = require('./views');
-const { EMERGENCY_TYPES, URGENCY, DECLINE_REASONS } = require('../shared/emergency');
+const { EMERGENCY_TYPES, URGENCY, DECLINE_REASONS, SERVICE_LABELS } = require('../shared/emergency');
 
 // Offer timings approved by Divya. Can be overridden with env vars for testing.
 const ROUND_SECONDS = () => Number(process.env.OFFER_ROUND_SECONDS || 30);   // approved: 30 s per round
 const HEAD_START_SECONDS = () => Number(process.env.COST_HEAD_START_SECONDS || 20);
 const RADII_KM = [5, 10, 15];
 // DEMO ONLY: if no person at a hospital answers within this many seconds, the
-// nearest hospital that was asked "accepts" automatically, and the app says it
+// one of the hospitals that was asked (at random) "accepts" automatically, and the app says it
 // was simulated. Set DEMO_AUTO_ACCEPT_SECONDS=0 to switch this off.
 const AUTO_ACCEPT_SECONDS = () => Number(process.env.DEMO_AUTO_ACCEPT_SECONDS ?? 8);
 const who = (e) => views.firstName((store.find('profiles', e.profileId) || {}).fullName);
@@ -247,6 +247,44 @@ async function understand(id, profile) {
     hub.publish(`hospital:${h.id}`, 'offer:update', views.level1Card(e, o, h));
   }
   broadcast(e);
+  await plan(id, input);
+}
+
+// Gemini jobs 2 + 4: the agent proposes next actions from a fixed menu and
+// writes the handover note. Code checks each one (ai.validatePlan) — here we
+// only carry out what passed. Without Gemini this does nothing and the plain
+// template handover is used.
+async function plan(id, input) {
+  let e = store.find('emergencies', id);
+  if (!e) return;
+  const out = await ai.planAndHandover({ ...input, alreadyNeeded: [...e.needs.required, ...e.needs.preferred] });
+  e = store.find('emergencies', id);
+  if (!out || !e) return;
+  const added = out.actions.filter((a) => a.type === 'add_service').map((a) => a.service)
+    .filter((s) => !e.needs.required.includes(s) && !e.needs.preferred.includes(s));
+  const questions = out.actions.filter((a) => a.type === 'ask_caller').map((a) => a.question);
+  const flags = out.actions.filter((a) => a.type === 'flag_for_hospital').map((a) => ({ note: a.note, source: a.source }));
+  const picture = { ...(e.picture || {}), questionsForCaller: [...questions, ...((e.picture && e.picture.questionsForCaller) || [])].slice(0, 4) };
+  e = save(e, {
+    picture,
+    needs: { required: e.needs.required, preferred: [...e.needs.preferred, ...added] },
+    agentFlags: flags,
+    handover: out.handover ? { ...out.handover, source: 'gemini', checkedByCode: true, removed: out.rejected.length } : null,
+  });
+  const did = [
+    added.length ? `prefer hospitals with ${added.map((x) => SERVICE_LABELS[x] || x).join(', ')}` : null,
+    questions.length ? `${questions.length} question(s) for the family` : null,
+    flags.length ? `${flags.length} warning(s) for the hospital` : null,
+    out.handover ? 'a handover note' : null,
+  ].filter(Boolean);
+  log(e, 'agent_plan', { actions: out.actions, rejected: out.rejected },
+    `Gemini proposed ${out.actions.length + out.rejected.length} step(s); code kept ${out.actions.length}${out.rejected.length ? ` and removed ${out.rejected.length} (${out.rejected.join('; ')})` : ''}. Kept: ${did.join('; ') || 'nothing'}.`,
+    `Prepared ${did.length ? did.join(', ') : 'nothing extra'} — every point checked against ${views.firstName((store.find('profiles', e.profileId) || {}).fullName)}'s profile.`);
+  for (const o of store.all('offers').filter((x) => x.emergencyId === id && x.status === 'pending')) {
+    const h = store.find('hospitals', o.hospitalId);
+    hub.publish(`hospital:${h.id}`, 'offer:update', views.level1Card(e, o, h));
+  }
+  broadcast(e);
 }
 
 // ---------------------------------------------------------------------------
@@ -281,18 +319,27 @@ function accept(offerId, hospital, opts = {}) {
   releasePending(e, 'taken');
   log(e, 'accepted', { hospital: hospital.name, seconds: secs, simulated: !!opts.simulated },
     opts.simulated
-      ? `DEMO ONLY: no person at a hospital answered within ${AUTO_ACCEPT_SECONDS()} seconds, so a simulated staff member at ${hospital.name} (nearest hospital asked) pressed Accept. All other hospitals were told "no action needed".`
+      ? `DEMO ONLY: no person at a hospital answered within ${AUTO_ACCEPT_SECONDS()} seconds, so a simulated staff member at ${hospital.name} (picked at random from the best-equipped hospitals asked) pressed Accept. All other hospitals were told "no action needed".`
       : `${hospital.name} accepted after ${secs} seconds. Its team can now open the patient's details. All other hospitals were told "no action needed".`,
     `${hospital.name} said YES in ${secs} seconds${opts.simulated ? ' (demo — automatic)' : ''}. Go there now. Their team can already see ${who(e)}'s details.`);
   broadcast(e);
   return e;
 }
 
-// DEMO ONLY — see AUTO_ACCEPT_SECONDS. Picks the nearest hospital still waiting.
+// DEMO ONLY — see AUTO_ACCEPT_SECONDS. Picks one of the hospitals still waiting, at random.
 function demoAutoAccept(id) {
   const e = store.find('emergencies', id);
   if (!e || e.receivingHospitalId || !['SEARCHING', 'NO_ACCEPT_YET'].includes(e.status)) return;
-  const o = store.all('offers').filter((x) => x.emergencyId === id && x.status === 'pending').sort((a, b) => a.distanceKm - b.distanceKm)[0];
+  // Pick from the BEST-EQUIPPED hospitals asked (most of the needed services
+  // declared), at random among equals — so a children's hospital never
+  // "accepts" an adult when a better-equipped hospital was also asked, and the
+  // demo does not show the same hospital every time.
+  const needs = [...e.needs.required, ...e.needs.preferred];
+  const pending = store.all('offers').filter((x) => x.emergencyId === id && x.status === 'pending')
+    .map((o) => ({ o, score: needs.filter((s) => (store.find('hospitals', o.hospitalId)?.services || []).includes(s)).length }));
+  const best = Math.max(...pending.map((x) => x.score));
+  const top = pending.filter((x) => x.score === best);
+  const o = top.length ? top[Math.floor(Math.random() * top.length)].o : null;
   if (!o) return;
   const h = store.find('hospitals', o.hospitalId);
   try { accept(o.id, h, { simulated: true }); } catch { /* someone accepted a moment earlier */ }

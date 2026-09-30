@@ -18,7 +18,7 @@
   const STEP_TITLE = {
     goal: 'Started', mask: 'Kept your details private', send_offers: 'Asking hospitals', widen_search: 'Looking a little further',
     tell_family: 'What to do now', understand: 'Read your message', accepted: 'A hospital said YES', offer_declined: 'A hospital said no',
-    hospital_cancelled: 'A hospital pulled out', arrived: 'Arrived', hospital_seen: 'The hospital is ready', divert: 'Changed hospital', cancelled: 'Cancelled',
+    hospital_cancelled: 'A hospital pulled out', arrived: 'Arrived', hospital_seen: 'The hospital is ready', divert: 'Changed hospital', cancelled: 'Cancelled', agent_plan: 'Got the hospital ready',
   };
 
   const S = {
@@ -39,8 +39,8 @@
   // ---- shared bits of the phone layout
   const initials = (n) => String(n || '?').replace(/\s*\(DEMO\)\s*/i, '').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   const header = () => `<div class="hdr"><div class="logo">${icon('heartPulse', { size: 26 })}</div>
-      <div class="grow"><div class="brand">GoldenBay</div><div class="tagline">Right hospital. Already prepared.</div></div>
-      <span class="pill ${S.ai === 'gemini' ? 'on' : ''}">${S.ai === 'gemini' ? '✦ Gemini' : 'Rules mode'}</span></div>`;
+      <div class="grow"><div class="brand">GoldenBay<span class="ai-pill ${S.ai === 'gemini' ? 'on' : ''}">${S.ai === 'gemini' ? '✦ Gemini' : 'Rules mode'}</span></div><div class="tagline">Right hospital. Already prepared.</div></div>
+      <a class="call112" href="tel:112">${icon('phone', { size: 16 })} 112</a></div>`;
   const banner = () => `<div class="demo-banner">${icon('alertTriangle', { size: 18 })}<span>Demo with synthetic data — not a real emergency service. In a real emergency in India, call <b>112</b>.</span></div>`;
 
   // =================================================================== sign in / join
@@ -109,7 +109,11 @@
 
   async function pollEm() {
     if (!S.token || !S.em) return;
-    try { setEm((await api('GET', `/v1/emergencies/${S.em.id}`)).emergency); } catch { /* try again next tick */ }
+    const id = S.em.id;
+    try {
+      const e = (await api('GET', `/v1/emergencies/${id}`)).emergency;
+      if (S.em && S.em.id === id) setEm(e);   // ignore a late answer for an emergency the user already closed
+    } catch { /* try again next tick */ }
   }
 
   function setEm(e) {
@@ -125,7 +129,6 @@
     root.innerHTML = `<div class="phone">
       ${header()}${banner()}
       <div class="pad" id="tab"></div>
-      <a class="call112" href="tel:112">${icon('phone', { size: 18 })} Call 112</a>
       <div class="tabbar">
         <button data-t="home">${icon('home')}<span>Home</span></button>
         <button data-t="profiles">${icon('users')}<span>Profiles</span></button>
@@ -236,6 +239,8 @@
     $('#send').onclick = () => confirmPatient();
   }
 
+  // "Chest pain, Can't breathe +3 more" instead of a long list
+  const shortTypes = (labels) => { const l = labels || []; return !l.length ? 'emergency' : l.slice(0, 2).join(', ') + (l.length > 2 ? ` +${l.length - 2} more` : ''); };
   const shortName = (n) => String(n || '').replace(/\s*\(DEMO\)\s*/i, '').split(/\s+/)[0];
 
   function setupMic() {
@@ -333,22 +338,25 @@
     const open = ACTIVE.includes(e.status);
     el.innerHTML = `
       <div style="margin-top:14px" class="stack">
-        <div class="row spread"><div><span class="tag crit">${esc(e.urgency)}</span> <b>${esc(e.patient.firstName)}</b> · ${esc((e.typeLabels || []).join(', ') || 'emergency')}</div><span class="small muted">#${esc(e.ref)}</span></div>
+        <div class="row spread"><div><span class="tag crit">${esc(e.urgency)}</span> <b>${esc(e.patient.firstName)}</b> · ${esc(shortTypes(e.typeLabels))}</div><span class="small muted">#${esc(e.ref)}</span></div>
         ${box}
-        ${e.picture?.questionsForCaller?.length ? `<div class="card"><h3>The hospital may ask you</h3>${e.picture.questionsForCaller.map((q) => `<div class="note" style="margin-top:8px">${esc(q)}</div>`).join('')}</div>` : ''}
+        ${e.picture?.questionsForCaller?.length ? `<div class="card"><h3>Good to find out</h3><p class="small muted">The hospital may ask you these.</p>${e.picture.questionsForCaller.map((q) => `<div class="note" style="margin-top:8px">${esc(q)}</div>`).join('')}</div>` : ''}
         <div class="card">
           <div class="row spread"><h3>What's happening</h3>${(e.log || []).length > 1 ? `<button class="link" id="togLog">${S.showLog ? 'Show less' : 'Show all steps'}</button>` : ''}</div>
           ${(S.showLog ? (e.log || []).slice().reverse() : (e.log || []).slice(-1)).map((l) => `<div class="logline"><span class="logtitle">${esc(STEP_TITLE[l.tool] || 'Update')}</span> <span class="small muted">${esc(new Date(l.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', second: '2-digit' }))}</span><br>${esc(l.say || l.reason)}</div>`).join('')}
         </div>
         ${open ? `<button class="btn ghost" id="divert">We're going to a different hospital</button>
-                  <button class="btn tan" id="cancel">Cancel this emergency</button>` : `<button class="btn" id="done">Back to start</button>`}
+                  <button class="btn tan" id="cancel">${e.status === 'SEARCHING' ? 'Cancel this emergency' : 'Finish — start a new emergency'}</button>` : `<button class="btn" id="done">Back to start</button>`}
       </div>`;
     const q = (id) => document.getElementById(id);
     if (q('togLog')) q('togLog').onclick = () => { S.showLog = !S.showLog; drawActive(el); };
     if (q('doctor')) q('doctor').onclick = showDoctor;
     if (q('divert')) q('divert').onclick = chooseOther;
-    if (q('cancel')) q('cancel').onclick = async () => { if (!confirm('Cancel this emergency? Hospitals will be told to stand down.')) return; try { setEm((await api('POST', `/v1/emergencies/${e.id}/cancel`, {})).emergency); } catch (er) { toast(er.message); } };
-    if (q('done')) q('done').onclick = () => { S.em = null; stopDrive(); drawTab(); };
+    if (q('cancel')) q('cancel').onclick = async () => {
+      if (!confirm(e.status === 'SEARCHING' ? 'Cancel this emergency? Hospitals will be told to stand down.' : 'Close this emergency and start a new one? The hospital will be told.')) return;
+      try { await api('POST', `/v1/emergencies/${e.id}/cancel`, {}); S.em = null; stopDrive(); go('sos'); toast('Closed. Ready for a new emergency.'); } catch (er) { toast(er.message); }
+    };
+    if (q('done')) q('done').onclick = () => { S.em = null; stopDrive(); go('sos'); };
     const ds = q('driveDemo'); if (ds) ds.onclick = () => startDrive(e);
     const rl = q('realLoc'); if (rl) rl.onclick = () => startReal(e);
     const sd = q('stopShare'); if (sd) sd.onclick = () => { stopDrive(); drawTab(); };
@@ -555,7 +563,17 @@
         <b>Never sent:</b> Aadhaar, PAN, home address, email, insurance details, document photos.</p>
         <p class="small muted">Every time a hospital opens your details it is listed under "Who viewed my data" (Profiles tab).</p>
       </div>
+      ${S.family.isDemo ? `<div class="section-title">Demo</div>
+      <div class="card stack"><p class="small muted">Closes every open emergency and puts the fictional hospitals back to their starting settings, so you can run the demo again from the start.</p>
+        <button class="btn ghost" id="reset">Reset demo</button></div>` : ''}
       <div style="margin-top:14px"><button class="btn tan" id="out">Sign out of this phone</button></div>`;
+    if ($('#reset')) $('#reset').onclick = async () => {
+      if (!confirm('Reset the demo? Open emergencies close and hospitals go back to their starting settings.')) return;
+      try {
+        const r = await api('POST', '/v1/demo/reset', {});
+        S.em = null; stopDrive(); toast(`Demo reset — closed ${r.closed} emergency(s). Ready to start again.`); go('home');
+      } catch (er) { toast(er.message); }
+    };
     $('#out').onclick = () => { if (confirm('Sign out of this phone?')) signOut(); };
   }
 

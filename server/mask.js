@@ -4,8 +4,8 @@
 // BEFORE they go to Gemini and BEFORE they reach any hospital.
 //
 // Two engines:
-//   1. Presidio (open source, runs on our own server) when PRESIDIO_URL is set
-//      and answers in time. Wired in Phase E.
+//   1. Presidio (open source, runs as a separate service) when PRESIDIO_URL is
+//      set and answers within 3 s — then the built-in rules as a second pass.
 //   2. These built-in rules otherwise. Every result says which engine ran, so
 //      the app never claims Presidio when it was not used.
 //
@@ -56,9 +56,60 @@ function maskBuiltin(text) {
   return { text: out, engine: 'builtin', found };
 }
 
-// Phase E replaces this with: try Presidio first, fall back to maskBuiltin.
+// ---- Presidio (optional) ---------------------------------------------------
+// Presidio is Microsoft's open-source PII detector. It runs as its OWN small
+// service (not inside this app). If PRESIDIO_URL is set, we ask it first:
+//   POST {PRESIDIO_URL}/analyze   {"text": "...", "language": "en"}
+//   -> [{ entity_type, start, end, score }, ...]
+// Its big win over our rules: it can spot PERSON NAMES and places.
+// Times and dates are kept (a doctor needs "started 20 minutes ago").
+// If Presidio is slow (>3 s), down, or not set, the built-in rules run alone —
+// and the result says so. The built-in rules ALWAYS run as a second pass,
+// because they know Indian formats (Aadhaar checksum, PAN, +91 mobiles).
+const KEEP = new Set(['DATE_TIME', 'NRP']);
+const MIN_SCORE = 0.5;
+
+async function presidioSpans(text) {
+  const base = (process.env.PRESIDIO_URL || '').replace(/\/+$/, '');
+  if (!base || !text) return null;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 3000);
+  try {
+    const res = await fetch(base + '/analyze', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, language: 'en' }), signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const arr = await res.json();
+    if (!Array.isArray(arr)) throw new Error('unexpected reply');
+    return arr.filter((r) => r && Number.isInteger(r.start) && Number.isInteger(r.end) && r.end > r.start
+      && (r.score ?? 1) >= MIN_SCORE && !KEEP.has(r.entity_type));
+  } catch (err) {
+    console.error('[mask] Presidio not used:', err.message);
+    return null;
+  } finally { clearTimeout(t); }
+}
+
+function applySpans(text, spans) {
+  // longest first, then drop overlaps, then replace from the end so positions stay valid
+  const chosen = [];
+  for (const s of [...spans].sort((a, b) => (b.end - b.start) - (a.end - a.start))) {
+    if (!chosen.some((c) => s.start < c.end && c.start < s.end)) chosen.push(s);
+  }
+  let out = text;
+  for (const s of chosen.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, s.start) + `[${String(s.entity_type).replace(/_/g, ' ')}]` + out.slice(s.end);
+  }
+  return { text: out, found: chosen.map((s) => String(s.entity_type).replace(/_/g, ' ')) };
+}
+
 async function mask(text) {
-  return maskBuiltin(text);
+  const src = String(text || '');
+  const spans = await presidioSpans(src);
+  if (!spans) return maskBuiltin(src);
+  const first = applySpans(src, spans);
+  const second = maskBuiltin(first.text);
+  return { text: second.text, engine: 'presidio+builtin', found: [...first.found, ...second.found] };
 }
 
 module.exports = { mask, maskBuiltin, verhoeffValid };

@@ -52,8 +52,8 @@ function level1Card(emergency, offer, hospital) {
 }
 
 // Template handover (SBAR structure, without the "Recommendation" part —
-// GoldenBay never recommends treatment). Gemini's written version arrives in
-// Phase F and must pass a fact-check against these same fields.
+// GoldenBay never recommends treatment). Built by code from the profile.
+// Gemini's note (ai.planAndHandover) is shown BESIDE it, never instead of it.
 function templateHandover(emergency, p) {
   return {
     situation: `${p.age ?? '?'}${p.sex ? ' ' + p.sex : ''} · ${typeLabels(emergency.types).join(', ') || emergency.picture?.suspectedCategory || 'emergency'} · urgency ${emergency.urgency}`,
@@ -83,7 +83,9 @@ function level2(emergency, hospital) {
     bloodGroup: p.bloodGroup || null,
     allergies: p.allergies || [], medications: p.medications || [],
     conditions: p.conditions || [], pastEvents: p.pastEvents || [],
-    handover: emergency.handover || templateHandover(emergency, p),
+    handover: templateHandover(emergency, p),                     // plain facts, built by code — always shown
+    aiNote: emergency.handover || null,                           // Gemini's note, only the points that passed the code check
+    flags: emergency.agentFlags || [],
     callerWords: emergency.descriptionMasked || '',
     picture: emergency.picture ? {
       suspectedCategory: emergency.picture.suspectedCategory, risks: emergency.picture.risks,

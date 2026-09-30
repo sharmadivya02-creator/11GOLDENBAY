@@ -12,7 +12,7 @@ const ai = require('./ai');
 const engine = require('./engine');
 const views = require('./views');
 const privacy = require('./privacy');
-const { DEMO_CENTER } = require('./seed');
+const { DEMO_CENTER, HOSPITALS } = require('./seed');
 const { HttpError } = require('./http');
 const { SERVICES, EMERGENCY_TYPES, DECLINE_REASONS, COST_PREFERENCES } = require('../shared/emergency');
 
@@ -237,6 +237,21 @@ function register(r) {
   r.post('/v1/emergencies/:id/cancel', (req) => {
     const m = auth.requireFamily(req);
     return { emergency: views.familyView(engine.familyCancel(req.params.id, m)) };
+  });
+
+  // DEMO ONLY: put the demo back to the start. Works only for the demo family.
+  // Closes its open emergencies (hospitals are told) and restores every
+  // fictional hospital's services and availability to the seed values.
+  r.post('/v1/demo/reset', (req) => {
+    const m = auth.requireFamily(req);
+    const f = store.find('families', m.familyId);
+    if (!f?.isDemo) throw new HttpError(403, 'NOT_DEMO', 'reset is only for the demo family');
+    const open = store.all('emergencies').filter((e) => e.familyId === f.id && ['SEARCHING', 'NO_ACCEPT_YET', 'ACCEPTED', 'DIVERTED'].includes(e.status));
+    for (const e of open) engine.familyCancel(e.id, m);
+    for (const h of HOSPITALS) {
+      if (store.find('hospitals', h.id)) store.update('hospitals', h.id, { services: h.services, unavailable: false, unavailableReason: null });
+    }
+    return { closed: open.length, hospitalsRestored: HOSPITALS.length };
   });
 
   // privacy rights — family-scoped (anyone could erase anyone before)

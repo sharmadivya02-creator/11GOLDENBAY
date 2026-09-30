@@ -14,6 +14,7 @@
 (() => {
   const { esc, toast, keep, makeApi, goLive, unlockSound, beep, mmss, secSince, chips, fmtDate } = GBX;
   const { SERVICES, SERVICE_LABELS, DECLINE_REASONS } = GB;
+  const SOURCE_LABEL = { allergies: 'allergies', medications: 'medicines', conditions: 'conditions', pastEvents: 'history', bloodGroup: 'blood group', callerWords: "caller's words", buttons: 'buttons tapped' };
 
   const S = {
     token: keep.get('gb_hospital_token'),
@@ -244,6 +245,13 @@
           <div class="small muted" style="margin-top:6px">Handover format: SBAR without a Recommendation — GoldenBay never recommends treatment. Source: ${esc(h.source)}.</div>
         </div>
 
+        ${p.flags?.length ? `<div><div class="small muted">Warnings (from the family's profile — checked by code)</div>${p.flags.map((f) => `<div class="allergy" style="margin-top:6px">⚠ ${esc(f.note)} <span class="small" style="font-weight:500">· from ${esc(SOURCE_LABEL[f.source] || f.source)}</span></div>`).join('')}</div>` : ''}
+        ${p.aiNote ? `<div class="sbar" style="background:#fff">
+            <div class="row spread"><b>Short note</b><span class="tag line">✦ Gemini · checked</span></div>
+            ${p.aiNote.situation ? `<div style="margin-top:6px">${esc(p.aiNote.situation)}</div>` : ''}
+            <ul>${(p.aiNote.keyPoints || []).map((k) => `<li>${esc(k.text)} <span class="small muted">(${esc(SOURCE_LABEL[k.source] || k.source)})</span></li>`).join('')}</ul>
+            ${p.aiNote.assessment ? `<div><b>Assessment</b> ${esc(p.aiNote.assessment)}</div>` : ''}
+            <div class="small muted" style="margin-top:6px">Every point was matched word-by-word to the family's profile or the caller's words${p.aiNote.removed ? `; ${esc(p.aiNote.removed)} point(s) that could not be matched were removed` : ''}. Not a diagnosis.</div></div>` : ''}
         ${p.callerWords ? `<div><div class="small muted">What the caller said (personal details masked)</div><div class="note">${esc(p.callerWords)}</div></div>` : ''}
         ${p.picture?.questionsForCaller?.length ? `<div><div class="small muted">Worth asking the caller</div>${p.picture.questionsForCaller.map((q) => `<div class="note" style="margin-top:6px">${esc(q)}</div>`).join('')}</div>` : ''}
 
