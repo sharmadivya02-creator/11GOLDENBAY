@@ -69,23 +69,45 @@ function maskBuiltin(text) {
 const KEEP = new Set(['DATE_TIME', 'NRP']);
 const MIN_SCORE = 0.5;
 
+// What the app can truthfully say about Presidio right now.
+const status = { lastOk: null, lastError: null, okCount: 0, failCount: 0 };
+const presidioBase = () => (process.env.PRESIDIO_URL || '').replace(/\/+$/, '');
+const TIMEOUT_MS = () => Math.max(500, Number(process.env.PRESIDIO_TIMEOUT_MS) || 4000);
+function presidioStatus() {
+  return { configured: !!presidioBase(), ...status };
+}
+// A free host puts an idle service to sleep. A quiet ping every few minutes
+// keeps the first real emergency from waiting for it to wake up.
+function keepPresidioWarm() {
+  // Off unless PRESIDIO_WARM_SECONDS is set: on a free host, pinging all day uses up the monthly free hours.
+  if (!presidioBase() || !process.env.PRESIDIO_WARM_SECONDS) return;
+  const ping = async () => {
+    try { await mask('Keep warm. Call 9876543210 for Anita.'); } catch { /* status already records it */ }
+  };
+  ping();
+  const every = Math.max(60, Number(process.env.PRESIDIO_WARM_SECONDS)) * 1000;
+  setInterval(ping, every).unref();
+}
+
 async function presidioSpans(text) {
-  const base = (process.env.PRESIDIO_URL || '').replace(/\/+$/, '');
+  const base = presidioBase();
   if (!base || !text) return null;
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 3000);
+  const t = setTimeout(() => ctl.abort(), TIMEOUT_MS());
   try {
     const res = await fetch(base + '/analyze', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(process.env.PRESIDIO_KEY ? { 'x-api-key': process.env.PRESIDIO_KEY } : {}) },
       body: JSON.stringify({ text, language: 'en' }), signal: ctl.signal,
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const arr = await res.json();
     if (!Array.isArray(arr)) throw new Error('unexpected reply');
+    status.lastOk = new Date().toISOString(); status.okCount++;
     return arr.filter((r) => r && Number.isInteger(r.start) && Number.isInteger(r.end) && r.end > r.start
       && (r.score ?? 1) >= MIN_SCORE && !KEEP.has(r.entity_type));
   } catch (err) {
     console.error('[mask] Presidio not used:', err.message);
+    status.lastError = `${new Date().toISOString()} ${err.name === 'AbortError' ? 'too slow (timeout)' : err.message}`; status.failCount++;
     return null;
   } finally { clearTimeout(t); }
 }
@@ -112,4 +134,4 @@ async function mask(text) {
   return { text: second.text, engine: 'presidio+builtin', found: [...first.found, ...second.found] };
 }
 
-module.exports = { mask, maskBuiltin, verhoeffValid };
+module.exports = { mask, maskBuiltin, verhoeffValid, presidioStatus, keepPresidioWarm };
