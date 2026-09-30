@@ -4,12 +4,12 @@
 // makes claims about a real institution. On stage these hospitals stand in for
 // "pilot partner hospitals" — and you say so out loud.
 //
-// Phone numbers are deliberately NOT real (all zeros) so a demo tap can never
-// ring a stranger.
+// Every demo phone number is the one Divya chose for the demo: 9170040198.
 
 const store = require('./store');
 
 const DEMO_CENTER = { lat: 28.6139, lng: 77.209 }; // New Delhi
+const DEMO_PHONE = '+91 91700 40198';               // chosen by Divya for the demo
 
 // joined: true  = this hospital uses the Hospital App (fictional pilot partner)
 // joined: false = only "listed" (stands in for the government Hospital Directory);
@@ -29,7 +29,7 @@ const HOSPITALS = [
   { id: 'hosp-9', name: 'Meadowbrook Nursing Home', lat: 28.6, lng: 77.23, type: 'private', schemes: [], services: [], joined: false },
 ].map((h) => ({
   joined: true, unavailable: false, unavailableReason: null,
-  phone: '+91 00000 00000', ...h, isDemo: true,
+  phone: DEMO_PHONE, ...h, isDemo: true,
 }));
 
 // Plain placeholder "photos" of documents (clearly marked synthetic).
@@ -57,7 +57,7 @@ const DEMO_PROFILES = [
     allergies: ['Sulfa drugs', 'Shellfish'], medications: ['Statins — daily', 'Ace inhibitors — daily'],
     conditions: ['Hypertension', 'Pre-diabetes'], pastEvents: [],
     insurance: 'Star Health', preferredHospital: null, costPreference: 'private-insurance',
-    emergencyContacts: [{ name: 'Aisha', relation: 'Wife', phone: '+91 00000 00001' }],
+    emergencyContacts: [{ name: 'Aisha', relation: 'Wife', phone: DEMO_PHONE }],
     consent: { type: 'self', at: '2026-08-03T10:00:00.000Z' }, medicalUpdatedAt: '2026-08-03T10:00:00.000Z',
     documents: [
       demoDoc('doc-demo-1', 'insurance', 'Policy card (DEMO)', 'Star Health · Member ID DEMO-8821', '#eaf1fb', '#3a6fb0'),
@@ -69,7 +69,7 @@ const DEMO_PROFILES = [
     allergies: ['Penicillin'], medications: ['Levothyroxine 50mcg — daily, morning'],
     conditions: ['Mild hypothyroidism'], pastEvents: ['Appendectomy, 2011'],
     insurance: 'Star Health', preferredHospital: null, costPreference: 'private-insurance',
-    emergencyContacts: [{ name: 'Rajesh', relation: 'Husband', phone: '+91 00000 00002' }],
+    emergencyContacts: [{ name: 'Rajesh', relation: 'Husband', phone: DEMO_PHONE }],
     consent: { type: 'self', at: '2026-09-10T10:00:00.000Z' }, medicalUpdatedAt: '2026-09-10T10:00:00.000Z',
     documents: [demoDoc('doc-demo-5', 'prescription', 'Prescription (DEMO)', 'Levothyroxine 50mcg — daily, morning', '#fbe9ec', '#7c0d20')],
   },
@@ -78,7 +78,7 @@ const DEMO_PROFILES = [
     allergies: ['Aspirin'], medications: ['Calcium supplement — daily', 'Alendronate — weekly, Sunday morning'],
     conditions: ['Osteoporosis', 'Mild hearing loss'], pastEvents: ['Hip fracture, 2022'],
     insurance: null, preferredHospital: null, costPreference: 'pmjay',
-    emergencyContacts: [{ name: 'Rajesh', relation: 'Son', phone: '+91 00000 00002' }],
+    emergencyContacts: [{ name: 'Rajesh', relation: 'Son', phone: DEMO_PHONE }],
     // added by her son; she has not confirmed it herself yet — shown honestly
     consent: { type: 'on-behalf', at: '2025-11-20T10:00:00.000Z' }, medicalUpdatedAt: '2025-11-20T10:00:00.000Z',
     documents: [],
@@ -88,7 +88,7 @@ const DEMO_PROFILES = [
     allergies: ['Peanuts'], medications: ['Salbutamol inhaler — as needed for asthma'],
     conditions: ['Mild asthma'], pastEvents: ['Hospitalised for bronchitis, 2023'],
     insurance: 'Star Health', preferredHospital: null, costPreference: 'private-insurance',
-    emergencyContacts: [{ name: 'Aisha', relation: 'Mother', phone: '+91 00000 00001' }],
+    emergencyContacts: [{ name: 'Aisha', relation: 'Mother', phone: DEMO_PHONE }],
     consent: { type: 'parental', at: '2026-06-15T10:00:00.000Z' }, medicalUpdatedAt: '2026-06-15T10:00:00.000Z',
     documents: [],
   },
