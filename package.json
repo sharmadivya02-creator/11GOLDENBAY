@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node test/flow.test.js && node test/gemini.test.js"
+    "test": "node test/flow.test.js && node test/gemini.test.js && node test/extras.test.js"
   },
   "engines": { "node": ">=18" }
 }

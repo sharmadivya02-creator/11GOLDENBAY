@@ -14,6 +14,7 @@
 (() => {
   const { esc, toast, keep, makeApi, goLive, unlockSound, beep, mmss, secSince, chips, fmtDate } = GBX;
   const { SERVICES, SERVICE_LABELS, DECLINE_REASONS } = GB;
+  const SOURCE_LABEL = { allergies: 'allergies', medications: 'medicines', conditions: 'conditions', pastEvents: 'history', bloodGroup: 'blood group', callerWords: "caller's words", buttons: 'buttons tapped' };
 
   const S = {
     token: keep.get('gb_hospital_token'),
@@ -78,7 +79,7 @@
     await refresh(true);
     S.live = goLive({
       api,
-      events: ['offer:new', 'offer:update', 'offer:closed', 'patient:update', 'patient:released', 'patient:location', 'arrival:incoming'],
+      events: ['offer:new', 'offer:update', 'offer:closed', 'patient:update', 'patient:released', 'patient:location', 'arrival:incoming', 'cpr:frame', 'cpr:scene'],
       onEvent: onEvent,
       onPoll: () => refresh(false),
     });
@@ -126,7 +127,34 @@
     }
   }
 
+  // CPR coach feed from the family's phone — only ever sent to the receiving hospital.
+  // Updated in place (twice a second) so the rest of the screen does not redraw.
+  const cpr = { last: null, scene: null };
+  function drawCpr() {
+    const box = document.getElementById('cprBox');
+    if (!box || !S.detail || !cpr.last || cpr.last.emergencyId !== S.detail.emergencyId) return;
+    const st = cpr.last.stats || {};
+    const ok = st.rate >= 100 && st.rate <= 120;
+    if (!box.dataset.ready) {
+      box.dataset.ready = '1';
+      box.innerHTML = `<div class="card stack" style="border:2px solid var(--crimson)">
+        <div class="row spread"><b>CPR in progress — live from the family's phone</b><span class="tag crit">LIVE</span></div>
+        <img id="cprImg" alt="Live picture from the rescuer's phone" style="width:100%;border-radius:12px;background:#000;aspect-ratio:16/9;object-fit:cover">
+        <div class="row wrap" id="cprStats"></div><div id="cprScene"></div>
+        <div class="small muted">Not recorded. Rate counted on the phone from arm movement — an estimate.</div></div>`;
+    }
+    if (cpr.last.jpeg) document.getElementById('cprImg').src = cpr.last.jpeg;
+    document.getElementById('cprStats').innerHTML = `<span class="tag ${ok ? 'ok' : 'wait'}">${esc(st.rate ?? '--')} / min</span>
+      <span class="tag line">${esc(st.count ?? 0)} pushes</span><span class="tag line">${esc(mmss(st.seconds || 0))}</span>
+      <span class="tag line">hands ${st.handsOk == null ? '—' : st.handsOk ? 'on centre' : 'off centre'}</span>
+      ${Date.now() - cpr.last.at > 5000 ? '<span class="tag wait">feed paused</span>' : ''}`;
+    const sc = cpr.scene && cpr.scene.emergencyId === S.detail.emergencyId ? cpr.scene.scene : null;
+    document.getElementById('cprScene').innerHTML = sc?.notesForER ? `<div class="note">${esc(sc.notesForER)} <span class="small muted">(${sc._source === 'gemini' ? '✦ Gemini, unverified' : 'sample text'})</span></div>` : '';
+  }
+
   function onEvent(name, data) {
+    if (name === 'cpr:frame') { cpr.last = data; drawCpr(); return; }
+    if (name === 'cpr:scene') { cpr.scene = data; drawCpr(); return; }
     if (name === 'patient:location' && S.detail && S.detail.emergencyId === data.emergencyId) {
       S.detail.liveLocation = { distanceKm: data.distanceKm, at: data.at }; drawRight(); return;
     }
@@ -143,7 +171,7 @@
     const inc = S.incoming.map((x) => `
       <div class="card row spread" data-open="${esc(x.emergencyId)}" style="cursor:pointer;border-left:6px solid var(--ok)">
         <div><b>Patient on the way · #${esc(x.ref)}</b>
-          <div class="small muted">${x.diverted ? 'Family chose this hospital' : 'You accepted'} · ${esc(x.status)}</div></div>
+          <div class="small muted">${x.diverted ? 'Family chose this hospital' : x.simulated ? 'Accepted automatically (demo — no one answered in time)' : 'You accepted'} · ${esc(x.status)}</div></div>
         <button class="btn small ok" data-open="${esc(x.emergencyId)}">Open</button>
       </div>`).join('');
     const rec = S.recent.map((x) => `<div class="logline"><b>#${esc(x.ref)}</b> · ${esc(labelStatus(x))}</div>`).join('');
@@ -226,6 +254,7 @@
         <div class="row spread"><div><span class="tag crit">${esc(p.urgency)}</span> <span class="small muted">#${esc(p.ref)} · ${esc(p.status)}</span></div>
           <button class="btn small ghost" id="closeDetail">Close</button></div>
         <h2>${esc(p.firstName)} · ${esc(p.age ?? '?')} yrs · ${esc(p.sex || '—')}${p.bloodGroup ? ` · ${esc(p.bloodGroup)}` : ''}</h2>
+        <div id="cprBox"></div>
         <div class="note good">${esc(p.arrivalBy)}${p.liveLocation ? ` · <b>${esc(p.liveLocation.distanceKm)} km away</b> (live, updated ${esc(new Date(p.liveLocation.at).toLocaleTimeString())})` : ''}</div>
 
         ${(p.allergies || []).length ? `<div class="allergy">ALLERGIES: ${esc(p.allergies.join(', '))}</div>` : '<div class="note">No allergies recorded (family-reported)</div>'}
@@ -244,6 +273,13 @@
           <div class="small muted" style="margin-top:6px">Handover format: SBAR without a Recommendation — GoldenBay never recommends treatment. Source: ${esc(h.source)}.</div>
         </div>
 
+        ${p.flags?.length ? `<div><div class="small muted">Warnings (from the family's profile — checked by code)</div>${p.flags.map((f) => `<div class="allergy" style="margin-top:6px">⚠ ${esc(f.note)} <span class="small" style="font-weight:500">· from ${esc(SOURCE_LABEL[f.source] || f.source)}</span></div>`).join('')}</div>` : ''}
+        ${p.aiNote ? `<div class="sbar" style="background:#fff">
+            <div class="row spread"><b>Short note</b><span class="tag line">✦ Gemini · checked</span></div>
+            ${p.aiNote.situation ? `<div style="margin-top:6px">${esc(p.aiNote.situation)}</div>` : ''}
+            <ul>${(p.aiNote.keyPoints || []).map((k) => `<li>${esc(k.text)} <span class="small muted">(${esc(SOURCE_LABEL[k.source] || k.source)})</span></li>`).join('')}</ul>
+            ${p.aiNote.assessment ? `<div><b>Assessment</b> ${esc(p.aiNote.assessment)}</div>` : ''}
+            <div class="small muted" style="margin-top:6px">Every point was matched word-by-word to the family's profile or the caller's words${p.aiNote.removed ? `; ${esc(p.aiNote.removed)} point(s) that could not be matched were removed` : ''}. Not a diagnosis.</div></div>` : ''}
         ${p.callerWords ? `<div><div class="small muted">What the caller said (personal details masked)</div><div class="note">${esc(p.callerWords)}</div></div>` : ''}
         ${p.picture?.questionsForCaller?.length ? `<div><div class="small muted">Worth asking the caller</div>${p.picture.questionsForCaller.map((q) => `<div class="note" style="margin-top:6px">${esc(q)}</div>`).join('')}</div>` : ''}
 
@@ -260,6 +296,7 @@
           : `<div class="row wrap"><button class="btn ok grow" id="arrived">Patient arrived</button>
               <button class="btn ghost grow" id="back">Can't take anymore</button></div>`}
       </div>`;
+    drawCpr();
     $('#closeDetail').onclick = () => { S.detail = null; drawRight(); };
     const q = (id) => document.getElementById(id);
     if (q('arrived')) q('arrived').onclick = async () => {

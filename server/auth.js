@@ -97,5 +97,5 @@ function requireHospital(req) {
 
 module.exports = {
   createFamily, joinFamily, requireFamily, ownRecord, addMember,
-  loginHospital, requireHospital, newToken, sha,
+  loginHospital, requireHospital, newToken, sha, brake,
 };

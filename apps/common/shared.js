@@ -1,10 +1,15 @@
 // shared.js — helpers used by all three views.
 
+// The User App saves this phone's family key; the lab page reuses it.
+function familyHeader() {
+  try { const t = localStorage.getItem('gb_family_token'); return t ? { 'x-family-token': t } : {}; } catch { return {}; }
+}
+
 // Tiny wrapper around fetch() for our JSON API.
 async function api(method, path, body) {
   const res = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...familyHeader() },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));

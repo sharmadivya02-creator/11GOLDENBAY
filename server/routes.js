@@ -12,6 +12,7 @@ const ai = require('./ai');
 const engine = require('./engine');
 const views = require('./views');
 const privacy = require('./privacy');
+const labs = require('./labs');
 const { DEMO_CENTER, HOSPITALS } = require('./seed');
 const { HttpError } = require('./http');
 const { SERVICES, EMERGENCY_TYPES, DECLINE_REASONS, COST_PREFERENCES } = require('../shared/emergency');
@@ -237,6 +238,127 @@ function register(r) {
   r.post('/v1/emergencies/:id/cancel', (req) => {
     const m = auth.requireFamily(req);
     return { emergency: views.familyView(engine.familyCancel(req.params.id, m)) };
+  });
+
+  // ------------------------------------------------------------ LOCK-SCREEN QR
+  // The QR on the lock-screen wallpaper opens a small public page. It shows
+  // ONLY: first name, blood group, allergies, and a "call family" button whose
+  // number appears only after a tap. Every opening is written to the access log
+  // ("Who viewed my data"). The family can switch it off at any time — the old
+  // link then stops working, even on a printed wallpaper.
+  r.post('/v1/profiles/:id/qr', (req) => {
+    const m = auth.requireFamily(req);
+    const p = auth.ownRecord('profiles', req.params.id, m);
+    if (p.consent?.type === 'on-behalf') throw new HttpError(400, 'PROFILE_NOT_CONFIRMED', `${views.firstName(p.fullName)} has to confirm this profile before a QR can be made.`);
+    const token = auth.newToken().slice(0, 22);
+    const qr = { token, enabled: true, createdAt: new Date().toISOString(), printOnWallpaper: !!req.body.printOnWallpaper };
+    store.update('profiles', p.id, { qr });
+    return { qr: { path: `/q/${token}`, printOnWallpaper: qr.printOnWallpaper } };
+  });
+  r.delete('/v1/profiles/:id/qr', (req) => {
+    const m = auth.requireFamily(req);
+    const p = auth.ownRecord('profiles', req.params.id, m);
+    store.update('profiles', p.id, { qr: null });
+    return { ok: true };
+  });
+  const qrProfile = (req, what) => {
+    auth.brake(`qr:${ip(req)}`, 60);
+    const p = store.all('profiles').find((x) => x.qr?.enabled && x.qr.token === req.params.token);
+    if (!p) throw new HttpError(404, 'NOT_FOUND', 'This QR code has been switched off or is not valid.');
+    store.insert('accessLog', {
+      profileId: p.id, familyId: p.familyId, hospitalId: null,
+      hospitalName: 'Someone who scanned the lock-screen QR', what, at: new Date().toISOString(),
+    });
+    return p;
+  };
+  r.get('/v1/q/:token', (req) => {
+    const p = qrProfile(req, 'lock-screen QR page: blood group and allergies');
+    return {
+      firstName: views.firstName(p.fullName), bloodGroup: p.bloodGroup || null, allergies: p.allergies || [],
+      hasContact: !!(p.emergencyContacts || [])[0]?.phone,
+      note: 'Entered by the family — not verified by a clinician.',
+    };
+  });
+  r.post('/v1/q/:token/contact', (req) => {
+    const p = qrProfile(req, 'lock-screen QR: family phone number shown');
+    const c = (p.emergencyContacts || [])[0];
+    if (!c?.phone) throw new HttpError(404, 'NO_CONTACT', 'No family contact was added.');
+    return { name: c.name, relation: c.relation, phone: c.phone };
+  });
+
+  // ------------------------------------------------------------ LAB REPORT READER
+  // Family-only. Reports belong to one profile of the signing-in family.
+  const ownLabs = (m, profileId) => store.all('labReports').filter((r) => r.profileId === profileId && r.familyId === m.familyId)
+    .sort((a, b) => new Date(a.reportDate || a.createdAt) - new Date(b.reportDate || b.createdAt));
+  r.get('/v1/labs/:profileId', (req) => {
+    const m = auth.requireFamily(req);
+    auth.ownRecord('profiles', req.params.profileId, m);
+    return { reports: ownLabs(m, req.params.profileId) };
+  });
+  r.post('/v1/labs/analyze', async (req) => {
+    const m = auth.requireFamily(req);
+    const profile = auth.ownRecord('profiles', req.body.profileId, m);
+    if (!req.body.imageBase64) throw new HttpError(400, 'VALIDATION_FAILED', 'imageBase64 is required');
+    const analysis = await labs.analyseReport({
+      base64: req.body.imageBase64, mimeType: req.body.mimeType, profile,
+      previousReports: ownLabs(m, profile.id),
+    });
+    let saved = null;
+    if (analysis.values?.length) {
+      saved = store.insert('labReports', {
+        profileId: profile.id, familyId: m.familyId,
+        reportDate: analysis.reportDate || new Date().toISOString().slice(0, 10),
+        labName: analysis.labName || null, values: analysis.values, source: analysis.source,
+      });
+    }
+    return { analysis, savedId: saved?.id || null };
+  });
+  // DEMO SAFETY: two older SYNTHETIC reports, so the trend line has history.
+  r.post('/v1/labs/demo-history', (req) => {
+    const m = auth.requireFamily(req);
+    const profile = auth.ownRecord('profiles', req.body.profileId, m);
+    for (const x of store.all('labReports').filter((x) => x.profileId === profile.id && x.isDemo)) store.remove('labReports', x.id);
+    const mk = (monthsAgo, creat, hba1c, hb, k) => {
+      const d = new Date(); d.setMonth(d.getMonth() - monthsAgo);
+      const v = (key, testName, value, unit, normalRange, status, means) => ({ key, testName, value, unit, normalRange, status, verdict: 'verified', confidence: 95, checks: [], means });
+      return store.insert('labReports', {
+        profileId: profile.id, familyId: m.familyId, isDemo: true, reportDate: d.toISOString().slice(0, 10),
+        labName: 'Demo Diagnostics (synthetic)', source: 'demo',
+        values: [
+          v('creatinine', 'Creatinine', creat, 'mg/dL', [0.7, 1.3], creat > 1.3 ? 'high' : 'normal', 'how well the kidneys are filtering'),
+          v('hba1c', 'HbA1c', hba1c, '%', [4.0, 5.6], hba1c > 5.6 ? 'high' : 'normal', 'average blood sugar over three months'),
+          v('haemoglobin', 'Haemoglobin', hb, 'g/dL', [13.0, 17.0], hb < 13 ? 'low' : 'normal', 'oxygen-carrying capacity of the blood'),
+          v('potassium', 'Potassium', k, 'mEq/L', [3.5, 5.1], k > 5.1 ? 'high' : 'normal', 'affects the heart rhythm directly'),
+        ],
+      });
+    };
+    const a = mk(18, 1.1, 6.1, 14.2, 4.4), b = mk(6, 1.4, 6.8, 13.1, 4.9);
+    return { ok: true, created: [a.id, b.id] };
+  });
+
+  // ------------------------------------------------------------ CPR COACH FEED
+  // The rescuer's phone sends a small picture + CPR numbers twice a second.
+  // They go ONLY to the hospital receiving this patient (not to every hospital,
+  // as the old app did) and are NOT stored. Every 20 s one frame may be shown
+  // to Gemini to describe the scene (only when Gemini is on).
+  const lastScene = new Map();
+  r.post('/v1/emergencies/:id/cpr-frame', (req) => {
+    const m = auth.requireFamily(req);
+    const e = auth.ownRecord('emergencies', req.params.id, m);
+    if (!['ACCEPTED', 'DIVERTED'].includes(e.status) || !e.receivingHospitalId) {
+      return { sent: false, why: 'No hospital has accepted yet — the coach still works on this phone.' };
+    }
+    const jpeg = typeof req.body.jpeg === 'string' && req.body.jpeg.startsWith('data:image/jpeg;base64,') ? req.body.jpeg.slice(0, 400000) : null;
+    const st = req.body.stats || {};
+    const stats = { rate: Number.isFinite(+st.rate) ? Math.round(+st.rate) : null, count: Number.isFinite(+st.count) ? Math.round(+st.count) : null, handsOk: typeof st.handsOk === 'boolean' ? st.handsOk : null, seconds: Number.isFinite(+st.seconds) ? Math.round(+st.seconds) : null };
+    hub.publish(`hospital:${e.receivingHospitalId}`, 'cpr:frame', { emergencyId: e.id, jpeg, stats, at: Date.now() });
+    if (jpeg && ai.geminiEnabled() && Date.now() - (lastScene.get(e.id) || 0) > 20000) {
+      lastScene.set(e.id, Date.now());
+      ai.readScene(jpeg.split(',')[1], 'image/jpeg')
+        .then((scene) => hub.publish(`hospital:${e.receivingHospitalId}`, 'cpr:scene', { emergencyId: e.id, scene, at: Date.now() }))
+        .catch(() => {});
+    }
+    return { sent: true };
   });
 
   // DEMO ONLY: put the demo back to the start. Works only for the demo family.

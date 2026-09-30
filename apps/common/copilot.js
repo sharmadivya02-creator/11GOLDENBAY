@@ -11,8 +11,10 @@
 //   5. Checks whether the hands are roughly over the centre of the chest.
 //   6. Sends frames + the live numbers to the hospital screen.
 //
-// IMPORTANT: the model runs on the phone itself. No internet needed once
-// loaded, no video leaves the device unless we choose to send it.
+// IMPORTANT: the counting runs on the phone itself. Pictures are sent ONLY
+// when a hospital has accepted this patient, and ONLY to that hospital. They
+// are not stored. Sending needs internet; the counting and the beat do not
+// (once this page and the model have loaded).
 
 // We load the AI model from YOUR OWN SERVER first, and only fall back to the
 // internet if the local copy is missing. That way a bad wifi at the venue
@@ -405,30 +407,38 @@ function speak(text, tone) {
 // over the connection GoldenBay already has. It works on weak networks and it
 // is about thirty lines of code instead of a WebRTC server.
 // ---------------------------------------------------------------------------
+// Signed-in family phone only: the key saved by the User App on this phone.
+function familyToken() { try { return localStorage.getItem('gb_family_token'); } catch { return null; } }
+
 function connectSocket() {
-  socket = io();
-  socket.on('connect', () => $('statFeed').textContent = 'feed live');
+  // (name kept from the old app) — nothing to open: frames go over normal HTTPS.
+  $('statFeed').textContent = emergencyId && familyToken() ? 'waiting for hospital' : 'coach only (not linked to an emergency)';
 }
 
 function startFrameSending() {
   const grab = document.createElement('canvas');
   grab.width = 480; grab.height = 270;
   const gctx = grab.getContext('2d');
+  let busy = false;
 
-  setInterval(() => {
-    if (!running || !socket?.connected) return;
-    gctx.drawImage(cam, 0, 0, grab.width, grab.height);
-    socket.emit('copilot:frame', {
-      emergencyId,
-      jpeg: grab.toDataURL('image/jpeg', 0.5),
-      stats: {
-        rate: currentRate,
-        compressions: totalPushes,
-        handsOk,
-        personSeen,
-        elapsedSec: Math.floor((Date.now() - startedAt) / 1000),
-      },
-    });
+  setInterval(async () => {
+    const token = familyToken();
+    if (!running || !emergencyId || !token || busy) return;
+    busy = true;
+    try {
+      gctx.drawImage(cam, 0, 0, grab.width, grab.height);
+      const res = await fetch(`/v1/emergencies/${encodeURIComponent(emergencyId)}/cpr-frame`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-family-token': token },
+        body: JSON.stringify({
+          jpeg: grab.toDataURL('image/jpeg', 0.5),
+          stats: { rate: currentRate, count: totalPushes, handsOk, seconds: Math.floor((Date.now() - startedAt) / 1000) },
+        }),
+      });
+      const out = await res.json().catch(() => ({}));
+      $('statFeed').textContent = out.sent ? 'hospital is watching' : 'waiting for hospital';
+    } catch { $('statFeed').textContent = 'no connection — keep going'; }
+    busy = false;
   }, FRAME_SEND_MS);
 }
 

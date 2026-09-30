@@ -102,7 +102,7 @@ function level2(emergency, hospital) {
     },
     patientConfirmedByCaller: !!emergency.patientConfirmed,
     liveLocation: live ? { at: live.at, distanceKm: round1(distanceKm(live, hospital)) } : null,
-    arrivalBy: emergency.divertedTo?.hospitalId === hospital.id ? 'Diverted here — arriving by ambulance or car' : 'Accepted by your team',
+    arrivalBy: emergency.divertedTo?.hospitalId === hospital.id ? 'Diverted here — arriving by ambulance or car' : emergency.simulatedAccept ? 'Accepted automatically (demo — no one at your desk answered in time)' : 'Accepted by your team',
   };
 }
 

@@ -3,9 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>GoldenBay — CPR Co-Pilot</title>
-  <link rel="stylesheet" href="/app.css" />
-  <link rel="stylesheet" href="/clinical.css" />
+  <title>GoldenBay — CPR coach</title>
   <style>
     /* ---- This page is full-screen video with things drawn on top ---- */
     html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
@@ -58,15 +56,16 @@
     #stats span { background:rgba(0,0,0,.5); padding:5px 11px; border-radius:999px; }
 
     /* The tap-to-start screen. Browsers need a real tap before camera/sound/vibration. */
-    #gate { position:fixed; inset:0; background:#0b0b0f; color:#fff; z-index:50;
+    #gate { position:fixed; inset:0; background:#f7f3ec; color:#2b1a16; z-index:50;
             display:flex; flex-direction:column; align-items:center; justify-content:center;
             gap:22px; padding:28px; text-align:center;
             font-family:system-ui,-apple-system,'Segoe UI',sans-serif; }
     #gate h1 { font-size:27px; margin:0; font-weight:800; }
-    #gate p  { margin:0; opacity:.65; font-size:15px; max-width:330px; line-height:1.5; }
-    #gate button { background:#ff3b30; color:#fff; border:0; border-radius:999px;
+    #gate p  { margin:0; opacity:.8; font-size:15px; max-width:330px; line-height:1.5; }
+    #gate button { background:#a61414; color:#fff; border:0; border-radius:999px;
                    padding:19px 46px; font-size:19px; font-weight:800; cursor:pointer; }
-    #gateNote { font-size:12px; opacity:.45; }
+    #gateNote { font-size:12px; opacity:.6; }
+    #gate a { color:#a61414; font-weight:700; }
   </style>
 </head>
 <body>
@@ -101,13 +100,13 @@
 
   <!-- Nothing starts until the rescuer taps. Browsers require this. -->
   <div id="gate">
-    <h1>CPR Co-Pilot</h1>
+    <h1>CPR coach</h1>
     <p>Your phone will watch you and keep you on rhythm. Prop it up so it can see your hands and shoulders.</p>
     <button id="btnStart">START</button>
-    <div id="gateNote">Camera, sound and vibration will be requested</div>
+    <div id="gateNote">Camera, sound and vibration will be requested. The counting happens on this phone; pictures go only to the hospital that accepted, and are not stored.</div>
+    <p style="font-size:13px"><b>Call 112 first.</b> This coach helps you keep the rhythm — it does not replace trained help. <a href="/">Back</a></p>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script type="module" src="/copilot.js"></script>
+  <script type="module" src="/common/copilot.js"></script>
 </body>
 </html>

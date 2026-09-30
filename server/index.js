@@ -89,6 +89,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/hospital' || p === '/hospital/') return serveStatic(DIRS.hospital, '/index.html', res) || notFound(res);
     if (p.startsWith('/hospital/') && serveStatic(DIRS.hospital, p.slice('/hospital'.length), res)) return;
     if (/^\/share\/[A-Za-z0-9_-]+$/.test(p)) return serveStatic(DIRS.user, '/share.html', res) || notFound(res);
+    if (/^\/q\/[A-Za-z0-9_-]+$/.test(p)) return serveStatic(DIRS.user, '/qr.html', res) || notFound(res);
+    if (p === '/cpr') return serveStatic(DIRS.common, '/copilot.html', res) || notFound(res);
+    if (p === '/labs') return serveStatic(DIRS.common, '/labs.html', res) || notFound(res);
     if (p === '/') return serveStatic(DIRS.user, '/index.html', res) || notFound(res);
     if (serveStatic(DIRS.user, p, res)) return;
     return notFound(res);
