@@ -14,6 +14,12 @@
   const { esc, toast, keep, makeApi, goLive, mmss, secSince, chips, fmtDate } = GBX;
   const { EMERGENCY_TYPES, COST_PREFERENCES } = GB;
   const ACTIVE = ['SEARCHING', 'NO_ACCEPT_YET', 'ACCEPTED', 'DIVERTED'];
+  // Short, everyday headings for each step (the sentence under it comes from the server).
+  const STEP_TITLE = {
+    goal: 'Started', mask: 'Kept your details private', send_offers: 'Asking hospitals', widen_search: 'Looking a little further',
+    tell_family: 'What to do now', understand: 'Read your message', accepted: 'A hospital said YES', offer_declined: 'A hospital said no',
+    hospital_cancelled: 'A hospital pulled out', arrived: 'Arrived', hospital_seen: 'The hospital is ready', divert: 'Changed hospital', cancelled: 'Cancelled', agent_plan: 'Got the hospital ready',
+  };
 
   const S = {
     token: keep.get('gb_family_token'),
@@ -23,26 +29,29 @@
     // emergency form
     patientId: null, picked: new Set(), text: '', useDemoLocation: true,
     // active emergency
+    profileView: null,
     em: null, showLog: false, hospitals: [], showDoctor: false,
     live: null, driveTimer: null, sending: false,
   };
   const api = makeApi(() => (S.token ? { 'x-family-token': S.token } : {}));
   const $ = (s) => document.querySelector(s);
   const root = $('#app');
+  // sheets open inside the phone frame, not over the whole browser window
+  const host = () => document.querySelector('.phone') || document.body;
 
   // ---- shared bits of the phone layout
   const initials = (n) => String(n || '?').replace(/\s*\(DEMO\)\s*/i, '').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   const header = () => `<div class="hdr"><div class="logo">${icon('heartPulse', { size: 26 })}</div>
-      <div class="grow"><div class="brand">GoldenBay</div><div class="tagline">Right hospital. Already prepared.</div></div>
-      <span class="pill ${S.ai === 'gemini' ? 'on' : ''}">${S.ai === 'gemini' ? '✦ Gemini' : 'Rules mode'}</span></div>`;
-  const banner = () => `<div class="demo-banner">${icon('alertTriangle', { size: 18 })}<span>Demo with synthetic data — not a real emergency service. In a real emergency in India, call <b>112</b>.</span></div>`;
+      <div class="grow"><div class="brand">GoldenBay<span class="ai-pill ${S.ai === 'gemini' ? 'on' : ''}">${S.ai === 'gemini' ? '✦ Gemini' : 'Rules mode'}</span></div><div class="tagline">Right hospital. Already prepared.</div></div>
+      <a class="call112" href="tel:112">${icon('phone', { size: 16 })} 112</a></div>`;
+  const banner = () => `<div class="demo-banner">${icon('alertTriangle', { size: 18 })}<span>Demo with made-up data — not a real emergency service. Real emergency in India: call <b>112</b>.</span></div>`;
 
   // =================================================================== sign in / join
   function showJoin(msg) {
     if (S.live) { S.live.stop(); S.live = null; }
     root.innerHTML = `<div class="phone">
       ${header()}${banner()}
-      <div class="pad">
+      <div class="screen"><div class="pad">
         <div class="card stack" style="margin-top:18px">
           <h2>Join your family</h2>
           ${msg ? `<div class="note bad">${esc(msg)}</div>` : ''}
@@ -57,7 +66,7 @@
           <button class="btn tan" id="create">Create family</button>
           <p class="small muted">You get a code to share with relatives. Each phone gets its own secret key — nobody else's family can see your records.</p>
         </div>
-      </div></div>`;
+      </div></div></div>`;
     const go = async (p) => {
       try {
         const r = await api('POST', p.path, p.body);
@@ -103,7 +112,11 @@
 
   async function pollEm() {
     if (!S.token || !S.em) return;
-    try { setEm((await api('GET', `/v1/emergencies/${S.em.id}`)).emergency); } catch { /* try again next tick */ }
+    const id = S.em.id;
+    try {
+      const e = (await api('GET', `/v1/emergencies/${id}`)).emergency;
+      if (S.em && S.em.id === id) setEm(e);   // ignore a late answer for an emergency the user already closed
+    } catch { /* try again next tick */ }
   }
 
   function setEm(e) {
@@ -118,8 +131,7 @@
   function drawShell() {
     root.innerHTML = `<div class="phone">
       ${header()}${banner()}
-      <div class="pad" id="tab"></div>
-      <a class="call112" href="tel:112">${icon('phone', { size: 18 })} Call 112</a>
+      <div class="screen" id="scroll"><div class="pad" id="tab"></div></div>
       <div class="tabbar">
         <button data-t="home">${icon('home')}<span>Home</span></button>
         <button data-t="profiles">${icon('users')}<span>Profiles</span></button>
@@ -130,7 +142,7 @@
     drawTab();
   }
 
-  function go(tab) { S.tab = tab; drawTab(); window.scrollTo({ top: 0 }); }
+  function go(tab) { S.tab = tab; if (tab !== 'profiles') S.profileView = null; drawTab(); const sc = $('#scroll'); if (sc) sc.scrollTop = 0; }
 
   function drawTab() {
     const el = $('#tab'); if (!el) return;
@@ -157,7 +169,7 @@
         <span class="grow"><b>Emergency SOS</b><span class="s">Ask nearby hospitals — the one that says yes gets the details first</span></span>
         ${icon('chevronRight')}</button></div>
 
-      <div class="section-head"><div class="section-title">Active profile</div><button class="link" id="switch">Switch</button></div>
+      <div class="section-head"><h2>Active profile</h2><button class="link" id="switch">Switch</button></div>
       ${p ? `<div class="card row" style="align-items:flex-start;gap:16px">
           <div class="avatar big av${S.profiles.indexOf(p) % 4}">${esc(initials(p.fullName))}</div>
           <div class="grow"><h3>${esc(p.fullName)}</h3><div class="small muted">${esc(p.relation || '')} · Age ${esc(p.age ?? '?')}</div>
@@ -165,18 +177,13 @@
             ${(p.medications || []).slice(0, 1).map((m) => `<span class="chip">${icon('pill', { size: 14 })}${esc(m)}</span>`).join('')}</div></div></div>`
         : '<div class="card muted">No profile yet — add one in the Profiles tab.</div>'}
 
-      <div class="section-head"><div class="section-title">Family</div><button class="link" id="seeAll">See all</button></div>
-      <div class="list">${S.profiles.slice(0, 4).map((x, i) => `
-        <button class="list-item" data-prof="${esc(x.id)}">
-          <div class="avatar av${i % 4}">${esc(initials(x.fullName))}</div>
-          <div><div class="name">${esc(x.fullName)}${x.id === S.patientId ? '<span class="badge-active">Active</span>' : ''}</div>
-            <div class="meta">${esc(x.relation || '')}, Age ${esc(x.age ?? '?')}</div></div>
-          <span class="chev">${icon('chevronRight')}</span></button>`).join('')}</div>`;
+      <div class="section-head"><h2>Family</h2><button class="link" id="seeAll">See all</button></div>
+      <div class="plist">${S.profiles.slice(0, 4).map(profRow).join('')}</div>`;
     $('#sosGo').onclick = () => go('sos');
     $('#seeAll').onclick = () => go('profiles');
     $('#switch').onclick = chooseActive;
     if ($('#liveBanner')) $('#liveBanner').onclick = () => go('sos');
-    el.querySelectorAll('[data-prof]').forEach((b) => b.onclick = () => { S.patientId = b.dataset.prof; go('profiles'); });
+    el.querySelectorAll('[data-prof]').forEach((b) => b.onclick = () => { go('profiles'); openProfile(b.dataset.prof); });
   }
 
   function chooseActive() {
@@ -185,7 +192,7 @@
       <p class="small muted">The Emergency tab starts with this person.</p>
       <div class="list">${S.profiles.map((x, i) => `<button class="list-item" data-pick="${esc(x.id)}"><div class="avatar av${i % 4}">${esc(initials(x.fullName))}</div><div><div class="name">${esc(x.fullName)}</div><div class="meta">${esc(x.relation || '')}, Age ${esc(x.age ?? '?')}</div></div></button>`).join('')}</div>
       <button class="btn ghost" id="close">Close</button></div>`;
-    document.body.appendChild(back);
+    host().appendChild(back);
     $('#close').onclick = () => back.remove();
     back.querySelectorAll('[data-pick]').forEach((b) => b.onclick = () => { S.patientId = b.dataset.pick; back.remove(); drawTab(); });
   }
@@ -230,6 +237,8 @@
     $('#send').onclick = () => confirmPatient();
   }
 
+  // "Chest pain, Can't breathe +3 more" instead of a long list
+  const shortTypes = (labels) => { const l = labels || []; return !l.length ? 'emergency' : l.slice(0, 2).join(', ') + (l.length > 2 ? ` +${l.length - 2} more` : ''); };
   const shortName = (n) => String(n || '').replace(/\s*\(DEMO\)\s*/i, '').split(/\s+/)[0];
 
   function setupMic() {
@@ -260,7 +269,7 @@
       <div class="note">If you send the wrong person's details, doctors could treat the wrong patient. Please check.</div>
       <button class="btn huge" id="yes">Yes — send now</button>
       <button class="btn ghost" id="no">No, go back</button></div>`;
-    document.body.appendChild(back);
+    host().appendChild(back);
     $('#no').onclick = () => back.remove();
     $('#yes').onclick = async () => { back.remove(); await send(p); };
   }
@@ -306,7 +315,7 @@
         <p class="small" style="margin-top:10px">We keep asking in the background. If one says yes, this screen changes.</p></div>`;
     } else if (e.status === 'ACCEPTED') {
       const h = e.hospital;
-      box = `<div class="status-box ok"><h2>✔ ${esc(h.name)} said yes</h2>
+      box = `<div class="status-box ok">${e.simulatedAccept ? '<span class="tag" style="background:rgba(255,255,255,.2);color:#fff;margin-bottom:8px">DEMO · AUTOMATIC ACCEPT</span>' : ''}<h2>✔ ${esc(h.name)} said yes</h2>
         <p>${e.timeToAcceptSec != null && e.timeToAcceptSec >= 1 ? 'Said yes in ' + esc(e.timeToAcceptSec) + ' seconds.' : 'Said yes right away.'} Their team can see ${esc(e.patient.firstName)}'s details now — go there.</p>
         <div class="row wrap" style="margin-top:12px">
           <a class="btn white ok-t small" target="_blank" rel="noopener" href="${esc(h.navigateUrl)}">Navigate</a>
@@ -327,22 +336,26 @@
     const open = ACTIVE.includes(e.status);
     el.innerHTML = `
       <div style="margin-top:14px" class="stack">
-        <div class="row spread"><div><span class="tag crit">${esc(e.urgency)}</span> <b>${esc(e.patient.firstName)}</b> · ${esc((e.typeLabels || []).join(', ') || 'emergency')}</div><span class="small muted">#${esc(e.ref)}</span></div>
+        <div class="row spread"><div><span class="tag crit">${esc(e.urgency)}</span> <b>${esc(e.patient.firstName)}</b> · ${esc(shortTypes(e.typeLabels))}</div><span class="small muted">#${esc(e.ref)}</span></div>
         ${box}
-        ${e.picture?.questionsForCaller?.length ? `<div class="card"><h3>The hospital may ask you</h3>${e.picture.questionsForCaller.map((q) => `<div class="note" style="margin-top:8px">${esc(q)}</div>`).join('')}</div>` : ''}
+        ${ACTIVE.includes(e.status) ? `<a class="card row" style="text-decoration:none;color:inherit" href="/cpr?e=${encodeURIComponent(e.id)}"><span class="logo" style="width:42px;height:42px">${icon('heartPulse', { size: 22 })}</span><span class="grow"><b>Not breathing? Open the CPR coach</b><br><span class="small muted">Camera keeps your rhythm. ${e.hospital ? `${esc(e.hospital.name)} can watch live.` : 'The hospital can watch once one says yes.'}</span></span>${icon('chevronRight')}</a>` : ''}
+        ${e.picture?.questionsForCaller?.length ? `<div class="card"><h3>Good to find out</h3><p class="small muted">The hospital may ask you these.</p>${e.picture.questionsForCaller.map((q) => `<div class="note" style="margin-top:8px">${esc(q)}</div>`).join('')}</div>` : ''}
         <div class="card">
-          <div class="row spread"><h3>What the agent is doing</h3><button class="btn small tan" id="togLog">${S.showLog ? 'Hide' : 'Show'}</button></div>
-          ${S.showLog ? (e.log || []).slice().reverse().map((l) => `<div class="logline"><b>${esc(l.tool.replace(/_/g, ' '))}</b> — ${esc(l.reason)}</div>`).join('') : '<p class="small muted" style="margin-top:6px">Every step is written in plain words, so you can see why it did what it did.</p>'}
+          <div class="row spread"><h3>What's happening</h3>${(e.log || []).length > 1 ? `<button class="link" id="togLog">${S.showLog ? 'Show less' : 'Show all steps'}</button>` : ''}</div>
+          ${(S.showLog ? (e.log || []).slice().reverse() : (e.log || []).slice(-1)).map((l) => `<div class="logline"><span class="logtitle">${esc(STEP_TITLE[l.tool] || 'Update')}</span> <span class="small muted">${esc(new Date(l.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', second: '2-digit' }))}</span><br>${esc(l.say || l.reason)}</div>`).join('')}
         </div>
         ${open ? `<button class="btn ghost" id="divert">We're going to a different hospital</button>
-                  <button class="btn tan" id="cancel">Cancel this emergency</button>` : `<button class="btn" id="done">Back to start</button>`}
+                  <button class="btn tan" id="cancel">${e.status === 'SEARCHING' ? 'Cancel this emergency' : 'Finish — start a new emergency'}</button>` : `<button class="btn" id="done">Back to start</button>`}
       </div>`;
     const q = (id) => document.getElementById(id);
     if (q('togLog')) q('togLog').onclick = () => { S.showLog = !S.showLog; drawActive(el); };
     if (q('doctor')) q('doctor').onclick = showDoctor;
     if (q('divert')) q('divert').onclick = chooseOther;
-    if (q('cancel')) q('cancel').onclick = async () => { if (!confirm('Cancel this emergency? Hospitals will be told to stand down.')) return; try { setEm((await api('POST', `/v1/emergencies/${e.id}/cancel`, {})).emergency); } catch (er) { toast(er.message); } };
-    if (q('done')) q('done').onclick = () => { S.em = null; stopDrive(); drawTab(); };
+    if (q('cancel')) q('cancel').onclick = async () => {
+      if (!confirm(e.status === 'SEARCHING' ? 'Cancel this emergency? Hospitals will be told to stand down.' : 'Close this emergency and start a new one? The hospital will be told.')) return;
+      try { await api('POST', `/v1/emergencies/${e.id}/cancel`, {}); S.em = null; stopDrive(); go('sos'); toast('Closed. Ready for a new emergency.'); } catch (er) { toast(er.message); }
+    };
+    if (q('done')) q('done').onclick = () => { S.em = null; stopDrive(); go('sos'); };
     const ds = q('driveDemo'); if (ds) ds.onclick = () => startDrive(e);
     const rl = q('realLoc'); if (rl) rl.onclick = () => startReal(e);
     const sd = q('stopShare'); if (sd) sd.onclick = () => { stopDrive(); drawTab(); };
@@ -391,7 +404,7 @@
       <p class="small muted">If it is on GoldenBay it gets an alert and the details now. If not, you will get a "Show to doctor" screen.</p>
       ${hs.map((h) => `<button class="card row spread" style="width:100%;text-align:left;cursor:pointer" data-h="${esc(h.id)}"><span><b>${esc(h.name)}</b><br><span class="small muted">${h.km.toFixed(1)} km · ${esc(h.type)}</span></span><span class="tag ${h.joined ? 'ok' : 'line'}">${h.joined ? 'On GoldenBay' : 'Not on GoldenBay'}</span></button>`).join('')}
       <button class="btn ghost" id="close">Close</button></div>`;
-    document.body.appendChild(back);
+    host().appendChild(back);
     $('#close').onclick = () => back.remove();
     back.querySelectorAll('[data-h]').forEach((b) => b.onclick = async () => {
       try { setEm((await api('POST', `/v1/emergencies/${e.id}/divert`, { hospitalId: b.dataset.h })).emergency); back.remove(); } catch (er) { toast(er.message); }
@@ -420,48 +433,213 @@
       ${c ? `<div class="k">Family contact</div><div class="v">${esc(c.name)} (${esc(c.relation)}) · ${esc(c.phone)}</div>` : ''}
       <div class="k">Source</div><div class="small">Entered by the family — not verified by a clinician. Last updated ${esc(fmtDate(p.lastMedicalUpdate))}.</div>
     </div><button class="btn ghost" style="margin-top:14px" id="close">Close</button></div>`;
-    document.body.appendChild(back);
+    host().appendChild(back);
     $('#close').onclick = () => back.remove();
   }
 
+
+  // =================================================================== LOCK-SCREEN QR
+  // HONEST LIMIT: a website is not allowed to change a phone's wallpaper — no
+  // browser offers that. So the app does everything up to that last tap:
+  //   1. it takes YOUR current wallpaper photo (you pick it) — or a plain one,
+  //   2. puts a small QR in the corner you choose,
+  //   3. opens the phone's share sheet with the finished image, where Android
+  //      shows "Set as wallpaper" / "Use as" and iPhone shows "Save Image"
+  //      (then Photos → Use as Wallpaper). Setting it with no tap at all needs
+  //      the Android app version (see the roadmap).
+  function qrSheet(p) {
+    if (!p) return;
+    const back = document.createElement('div'); back.className = 'sheet-back';
+    const on = !!p.qr?.enabled;
+    const st = { photo: null, corner: 'bottom-right', png: null, file: null };
+    back.innerHTML = `<div class="sheet stack">
+      <h2>Lock-screen QR for ${esc(shortName(p.fullName))}</h2>
+      <p class="small">If ${esc(shortName(p.fullName))} collapses, anyone can scan the small QR on the locked phone and see <b>blood group, allergies</b> and a button to call the family. Nothing else.</p>
+      <div><div class="small muted" style="margin-bottom:6px">1 · Background</div>
+        <div class="row wrap"><label class="btn small tan" style="margin:0">${icon('camera', { size: 16 })}&nbsp;Use my wallpaper photo<input type="file" id="qrPhoto" accept="image/*" hidden></label>
+        <button class="btn small ghost" id="qrPlain">Plain background</button></div></div>
+      <div><div class="small muted" style="margin-bottom:6px">2 · Where should the QR go?</div>
+        <div class="pat-pick" id="qrCorner">${[['bottom-left', 'Bottom left'], ['bottom-right', 'Bottom right'], ['middle', 'Middle']].map(([k, l]) => `<button data-c="${k}" class="${k === 'bottom-right' ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <label class="row" style="align-items:flex-start"><input type="checkbox" id="qrPrint" ${p.qr?.printOnWallpaper ? 'checked' : ''} style="margin-top:4px">
+        <span><b>Also print blood group and allergies next to the QR</b><br><span class="small muted">Works without internet, but anyone who sees the phone can read them, and turning the QR off won't remove them from an image you already saved.</span></span></label>
+      <button class="btn" id="qrMake">${on ? 'Make my wallpaper (new link)' : 'Turn on and make my wallpaper'}</button>
+      <div id="qrPrev" style="text-align:center"></div>
+      ${on ? '<button class="btn ghost" id="qrOff">Turn QR off (old wallpapers stop working)</button>' : ''}
+      <p class="small muted">Every scan is listed under "Who viewed my data". ${['localhost', '127.0.0.1'].includes(location.hostname) ? '<b>You are on localhost — a phone cannot open this link. Make the wallpaper from your Render link.</b>' : ''}</p>
+      <button class="btn tan" id="close">Close</button></div>`;
+    host().appendChild(back);
+    const q = (sel) => back.querySelector(sel);
+    q('#close').onclick = () => back.remove();
+    q('#qrPhoto').onchange = (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const img = new Image(); img.onload = () => { st.photo = img; toast('Photo added — now make the wallpaper.'); }; img.src = URL.createObjectURL(f);
+    };
+    q('#qrPlain').onclick = () => { st.photo = null; toast('Plain background.'); };
+    back.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => { st.corner = b.dataset.c; back.querySelectorAll('[data-c]').forEach((x) => x.classList.toggle('on', x === b)); });
+    if (on) q('#qrOff').onclick = async () => {
+      try { await api('DELETE', `/v1/profiles/${p.id}/qr`); await loadProfiles(); toast('QR switched off. Old wallpapers now open "not available".'); back.remove(); drawTab(); } catch (e) { toast(e.message); }
+    };
+    q('#qrMake').onclick = async () => {
+      try {
+        const printOn = q('#qrPrint').checked;
+        const r = await api('POST', `/v1/profiles/${p.id}/qr`, { printOnWallpaper: printOn });
+        await loadProfiles();
+        const canvas = wallpaper(location.origin + r.qr.path, printOn ? p : null, st.photo, st.corner);
+        st.png = canvas.toDataURL('image/png');
+        const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+        st.file = new File([blob], 'goldenbay-lockscreen.png', { type: 'image/png' });
+        const canShare = !!(navigator.canShare && navigator.canShare({ files: [st.file] }));
+        q('#qrPrev').innerHTML = `<img src="${st.png}" alt="Wallpaper preview" style="width:52%;border-radius:22px;border:6px solid #17130f;margin-top:4px">
+          ${canShare ? '<button class="btn ok" id="qrSet" style="margin-top:12px">Set as lock screen…</button>' : ''}
+          <a class="btn ${canShare ? 'ghost' : 'ok'}" style="margin-top:10px;width:100%" download="goldenbay-lockscreen.png" href="${st.png}">Download wallpaper</a>
+          <p class="small muted" style="margin-top:8px;text-align:left">${canShare
+            ? '<b>Android:</b> in the list that opens, pick <b>Set as wallpaper</b> (or Photos → Use as → Wallpaper) → Lock screen.<br><b>iPhone:</b> pick <b>Save Image</b>, then Photos → Share → <b>Use as Wallpaper</b>.'
+            : '<b>Android:</b> open the downloaded image → ⋮ → Set as wallpaper → Lock screen.<br><b>iPhone:</b> save it to Photos → Share → Use as Wallpaper.'}
+            <br>A new link was made, so older wallpapers no longer work.</p>`;
+        if (canShare) q('#qrSet').onclick = async () => {
+          try { await navigator.share({ files: [st.file], title: 'GoldenBay lock screen' }); } catch (e) { if (e.name !== 'AbortError') toast('Sharing did not open — use Download instead.'); }
+        };
+      } catch (e) { toast(e.message, 5000); }
+    };
+  }
+
+  // Draws a 1080×2340 phone wallpaper. The top third is left free for the
+  // clock; the QR sits small in the chosen corner, on a white card so it scans
+  // on any photo.
+  function wallpaper(url, printProfile, photo, corner) {
+    const W = 1080, H = 2340, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    if (photo) { // cover-fit the person's own photo
+      const r = Math.max(W / photo.width, H / photo.height), w = photo.width * r, h = photo.height * r;
+      g.drawImage(photo, (W - w) / 2, (H - h) / 2, w, h);
+    } else {
+      const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#f7f3ec'); bg.addColorStop(1, '#e3dac9');
+      g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    }
+    const qr = GBQR.make(url);
+    const cell = Math.max(6, Math.floor(300 / (qr.size + 8))), side = cell * (qr.size + 8);
+    const pad = 26, label = 58, info = printProfile ? 92 : 0;
+    const cardW = side + pad * 2, cardH = side + pad * 2 + label + info;
+    const margin = 70, bottomGap = 330; // stay clear of the phone's own bottom buttons
+    const x = corner === 'bottom-left' ? margin : corner === 'middle' ? (W - cardW) / 2 : W - margin - cardW;
+    const y = corner === 'middle' ? (H - cardH) / 2 + 180 : H - bottomGap - cardH;
+    g.save(); g.shadowColor = 'rgba(0,0,0,.28)'; g.shadowBlur = 30; g.shadowOffsetY = 8;
+    g.fillStyle = '#fff'; roundRect(g, x, y, cardW, cardH, 34); g.fill(); g.restore();
+    g.fillStyle = '#a61414'; g.textAlign = 'center';
+    let fs = 34; do { g.font = `800 ${fs}px system-ui, sans-serif`; fs -= 1; } while (g.measureText('EMERGENCY? SCAN').width > cardW - 36 && fs > 14);
+    g.fillText('EMERGENCY? SCAN', x + cardW / 2, y + pad + 34);
+    const qx = x + pad, qy = y + pad + label;
+    g.fillStyle = '#17130f';
+    for (let yy = 0; yy < qr.size; yy++) for (let xx = 0; xx < qr.size; xx++) if (qr.get(xx, yy)) g.fillRect(qx + (xx + 4) * cell, qy + (yy + 4) * cell, cell, cell);
+    if (printProfile) {
+      g.fillStyle = '#8c0303'; g.font = '800 32px system-ui, sans-serif';
+      g.fillText(`Blood ${printProfile.bloodGroup || '?'}`, x + cardW / 2, qy + side + 38);
+      g.font = '600 24px system-ui, sans-serif'; g.fillStyle = '#2b1a16';
+      const al = (printProfile.allergies || []).join(', ') || 'no allergies recorded';
+      g.fillText(al.length > 26 ? al.slice(0, 25) + '…' : al, x + cardW / 2, qy + side + 74);
+    }
+    return c;
+  }
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+
   // =================================================================== PROFILES
+  // List of family members → tap one → a detail page, one row per kind of
+  // information (like a phone's contact card). Tap a row to change it.
+  const CONSENT = { self: 'Confirmed by the patient', parental: 'Declared by a parent or guardian', 'on-behalf': 'Added by a relative — not confirmed yet' };
+  const COST = { any: 'Any hospital', government: 'Government hospitals first', pmjay: 'Ayushman Bharat (PM-JAY)', 'private-insurance': 'Private insurance' };
+  const avClass = (p) => `av${Math.max(0, S.profiles.indexOf(p)) % 4}`;
+  function profRow(p) {
+    return `<button class="prow" data-prof="${esc(p.id)}">
+      <div class="avatar ${avClass(p)}">${esc(initials(p.fullName))}</div>
+      <div class="grow"><div class="name">${esc(p.fullName)}${p.id === S.patientId ? '<span class="badge-active">Active</span>' : ''}</div>
+        <div class="rel">${esc(p.relation || 'Family')}, Age ${esc(p.age ?? '?')}${p.consent?.type === 'on-behalf' ? ' · <span style="color:var(--crimson)">not confirmed</span>' : ''}</div></div>
+      <span class="chev">${icon('chevronRight')}</span></button>`;
+  }
+  function openProfile(id) { S.profileView = id; drawTab(); const sc = $('#scroll'); if (sc) sc.scrollTop = 0; }
+
   function drawProfiles(el) {
+    const p = S.profileView && S.profiles.find((x) => x.id === S.profileView);
+    if (p) return drawProfileDetail(el, p);
     el.innerHTML = `
-      <div class="section-title">Profiles — what hospitals see only after they say yes</div>
-      ${S.profiles.map((p) => profileCard(p)).join('') || '<div class="card muted">No profiles yet.</div>'}
-      <div style="margin-top:14px"><button class="btn" id="add">Add a profile</button></div>
-      <div id="logbox"></div>`;
+      <div class="section-head" style="margin-top:14px"><h2>Family profiles</h2></div>
+      <div class="plist">${S.profiles.map(profRow).join('') || '<div class="prow muted">No profiles yet.</div>'}</div>
+      <button class="add-row" id="add">${icon('plus', { size: 18 })} Add family member</button>
+      <p class="small muted" style="margin-top:14px">Hospitals see these details only after they say yes — and you can see every time they do.</p>`;
     $('#add').onclick = () => profileForm(null);
-    el.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => profileForm(S.profiles.find((p) => p.id === b.dataset.edit)));
-    el.querySelectorAll('[data-confirm]').forEach((b) => b.onclick = async () => {
+    el.querySelectorAll('[data-prof]').forEach((b) => b.onclick = () => openProfile(b.dataset.prof));
+  }
+
+  function drow(key, ic, color, label, value, hint, soft) {
+    return `<button class="drow tap" data-row="${key}"><span class="ic ${color}">${icon(ic, { size: 19 })}</span>
+      <span class="body"><div class="label">${esc(label)}</div><div class="value ${soft ? 'soft' : ''}">${value}</div>${hint ? `<div class="hint">${hint}</div>` : ''}</span>
+      <span class="chev">${icon('chevronRight', { size: 18 })}</span></button>`;
+  }
+
+  function drawProfileDetail(el, p) {
+    const c = (p.emergencyContacts || [])[0];
+    const list = (a) => (a && a.length ? esc(a.join(', ')) : null);
+    const none = '<span class="muted">None recorded</span>';
+    const cType = p.consent?.type;
+    el.innerHTML = `
+      <div class="topbar-nav"><button class="icon-btn" id="back" aria-label="Back">${icon('arrowLeft', { size: 18 })}</button>
+        <div class="title">${esc(p.relation || 'Profile')}</div><span></span></div>
+      <div class="detail-head"><div class="avatar xl ${avClass(p)}">${esc(initials(p.fullName))}</div>
+        <div><h1>${esc(p.fullName)}</h1><p>${esc(p.relation || 'Family')} · Age ${esc(p.age ?? '?')}${p.bloodGroup ? ` · ${esc(p.bloodGroup)}` : ''}</p></div></div>
+      ${cType === 'on-behalf' ? `<div class="note bad" style="margin-bottom:12px">${esc(shortName(p.fullName))} hasn't confirmed this profile, so it can't be sent to hospitals yet.${(p.age == null || p.age >= 18) ? ' <button class="link" id="confirmMe" style="color:var(--crimson);font-weight:750;background:none;border:0;text-decoration:underline">This is me — confirm</button>' : ''}</div>` : ''}
+      ${p.stale ? `<div class="note warn" style="margin-bottom:12px">Medical details last updated ${esc(p.daysSinceUpdate)} days ago — hospitals will see that. Please check them.</div>` : ''}
+
+      <div class="dlist">
+        ${drow('edit', 'heartPulse', 'red', 'Blood group', p.bloodGroup ? esc(p.bloodGroup) : none)}
+        ${drow('edit', 'alertTriangle', 'red', 'Allergies', list(p.allergies) || none)}
+        ${drow('edit', 'pill', 'blue', 'Medicines', list(p.medications) || none)}
+        ${drow('edit', 'clock', 'amber', 'Conditions & history', list([...(p.conditions || []), ...(p.pastEvents || [])]) || none)}
+        ${drow('edit', 'phone', 'green', 'Emergency contact', c ? `${esc(c.name)}${c.relation ? ` (${esc(c.relation)})` : ''} · ${esc(c.phone)}` : none)}
+        ${drow('edit', 'hospital', 'red', 'Hospital cost preference', esc(COST[p.costPreference] || 'Any hospital'), 'Only changes the order when a case is not life-threatening')}
+        ${drow('edit', 'shield', 'blue', 'Insurance', p.insurance ? esc(p.insurance) : none, 'Never sent to hospitals', true)}
+      </div>
+
+      <div class="dlist">
+        ${cType !== 'on-behalf' ? drow('qr', 'qr', 'violet', 'Lock-screen QR', p.qr?.enabled ? 'On — tap to make or change the wallpaper' : 'Off — tap to set up', null, !p.qr?.enabled) : ''}
+        ${drow('labs', 'file', 'green', 'Lab reports', 'Read, checked, and put side by side', null, true)}
+        ${drow('viewed', 'users', 'violet', 'Who viewed my data', 'Every hospital or QR scan that opened this profile', null, true)}
+        ${drow('privacy', 'shield', 'violet', 'Privacy & your data', esc(CONSENT[cType] || 'Consent not recorded'), `Updated ${esc(fmtDate(p.lastMedicalUpdate))}`, true)}
+      </div>
+
+      <button class="btn" id="sosFor">Start emergency for ${esc(shortName(p.fullName))}</button>`;
+    $('#back').onclick = () => { S.profileView = null; drawTab(); };
+    $('#sosFor').onclick = () => { S.patientId = p.id; go('sos'); };
+    if ($('#confirmMe')) $('#confirmMe').onclick = async () => {
       if (!confirm('Confirm this is YOUR profile and that you agree to it being shown to a hospital in an emergency?')) return;
-      try { await api('POST', `/v1/profiles/${b.dataset.confirm}/confirm`, {}); await loadProfiles(); toast('Confirmed.'); drawTab(); } catch (e) { toast(e.message); }
-    });
-    el.querySelectorAll('[data-viewed]').forEach((b) => b.onclick = () => showAccessLog(b.dataset.viewed));
-    el.querySelectorAll('[data-export]').forEach((b) => b.onclick = () => exportProfile(b.dataset.export));
-    el.querySelectorAll('[data-erase]').forEach((b) => b.onclick = async () => {
-      if (!confirm('Delete this profile and every record linked to it? This cannot be undone.')) return;
-      try { await api('DELETE', `/v1/privacy/erase/${b.dataset.erase}`); await loadProfiles(); toast('Erased.'); drawTab(); } catch (e) { toast(e.message); }
+      try { await api('POST', `/v1/profiles/${p.id}/confirm`, {}); await loadProfiles(); toast('Confirmed.'); drawTab(); } catch (e) { toast(e.message); }
+    };
+    el.querySelectorAll('[data-row]').forEach((b) => b.onclick = () => {
+      const k = b.dataset.row;
+      if (k === 'edit') return profileForm(p);
+      if (k === 'qr') return qrSheet(p);
+      if (k === 'labs') { location.href = `/labs?p=${encodeURIComponent(p.id)}`; return; }
+      if (k === 'viewed') return showAccessLog(p.id);
+      if (k === 'privacy') return privacySheet(p);
     });
   }
 
-  const CONSENT = { self: 'Confirmed by the patient', parental: 'Declared by a parent or guardian', 'on-behalf': 'Added by a relative — not confirmed yet' };
-  function profileCard(p) {
-    const cType = p.consent?.type;
-    return `<div class="card stack">
-      <div class="row spread"><h3>${esc(p.fullName)}</h3><span class="tag line">${esc(p.relation || '')}</span></div>
-      <div>${esc(p.age ?? '?')} yrs · ${esc(p.sex || '—')} · ${esc(p.bloodGroup || 'blood group unknown')}</div>
-      <div>${p.allergies?.length ? chips(p.allergies.map((a) => 'Allergy: ' + a), 'need') : '<span class="muted small">No allergies recorded</span>'}</div>
-      <div class="small">${esc(CONSENT[cType] || 'Consent not recorded')}</div>
-      ${cType === 'on-behalf' ? `<div class="note bad">Cannot be sent to hospitals until this person confirms it.</div>` : ''}
-      ${p.stale ? `<div class="note warn">Last medical update ${esc(p.daysSinceUpdate)} days ago — please review.</div>` : `<div class="small muted">Medical details updated ${esc(fmtDate(p.lastMedicalUpdate))}</div>`}
-      <div class="row wrap">
-        <button class="btn small tan" data-edit="${esc(p.id)}">Edit</button>
-        ${cType === 'on-behalf' && (p.age == null || p.age >= 18) ? `<button class="btn small" data-confirm="${esc(p.id)}">This is me — confirm</button>` : ''}
-        <button class="btn small ghost" data-viewed="${esc(p.id)}">Who viewed my data</button>
-        <button class="btn small ghost" data-export="${esc(p.id)}">Download my data</button>
-        <button class="btn small ghost" data-erase="${esc(p.id)}">Erase</button>
-      </div></div>`;
+  function privacySheet(p) {
+    const back = document.createElement('div'); back.className = 'sheet-back';
+    back.innerHTML = `<div class="sheet stack"><h2>Privacy & your data</h2>
+      <div class="note">${esc(CONSENT[p.consent?.type] || 'Consent not recorded')}</div>
+      <p class="small">Hospitals first see a no-name card. Only the hospital that says yes sees ${esc(shortName(p.fullName))}'s medical details — and it shows up in "Who viewed my data". Insurance, Aadhaar, PAN and home address are never sent.</p>
+      <button class="btn ghost" id="exp">Download all of ${esc(shortName(p.fullName))}'s data</button>
+      <button class="btn ghost" id="era" style="color:var(--dark)">Erase this profile and everything linked to it</button>
+      <button class="btn tan" id="close">Close</button></div>`;
+    host().appendChild(back);
+    back.querySelector('#close').onclick = () => back.remove();
+    back.querySelector('#exp').onclick = () => exportProfile(p.id);
+    back.querySelector('#era').onclick = async () => {
+      if (!confirm('Delete this profile and every record linked to it? This cannot be undone.')) return;
+      try { await api('DELETE', `/v1/privacy/erase/${p.id}`); await loadProfiles(); back.remove(); S.profileView = null; toast('Erased.'); drawTab(); } catch (e) { toast(e.message); }
+    };
   }
 
   async function showAccessLog(id) {
@@ -472,7 +650,7 @@
       back.innerHTML = `<div class="sheet stack"><h2>Who viewed ${esc(shortName(p.fullName))}'s data</h2>
         ${entries.length ? entries.map((a) => `<div class="card"><b>${esc(a.hospitalName)}</b><div class="small muted">${esc(a.what)} · ${esc(new Date(a.at).toLocaleString('en-IN'))}</div></div>`).join('') : '<div class="note">Nobody has viewed this profile yet. A hospital can only open details after it accepts a patient — and every time is listed here.</div>'}
         <button class="btn ghost" id="close">Close</button></div>`;
-      document.body.appendChild(back);
+      host().appendChild(back);
       $('#close').onclick = () => back.remove();
     } catch (e) { toast(e.message); }
   }
@@ -510,7 +688,7 @@
           <option value="parental">My child's — I am the parent or guardian</option>
           <option value="on-behalf">A relative's — they must confirm it later</option></select></label>` : ''}
       <button class="btn" id="save">Save</button><button class="btn ghost" id="close">Cancel</button></div>`;
-    document.body.appendChild(back);
+    host().appendChild(back);
     $('#close').onclick = () => back.remove();
     $('#save').onclick = async () => {
       const contactName = $('#f_cn').value.trim();
@@ -541,6 +719,11 @@
         <p class="small muted">Relatives use this code to join. Each phone gets its own secret key.</p>
         <div>${S.members.map((m) => `<span class="chip">${esc(m.label)}</span>`).join('')}</div>
       </div>
+      <div class="section-title">Tools</div>
+      <div class="list">
+        <a class="list-item" style="text-decoration:none" href="/labs"><span class="avatar av3">${icon('file', { size: 20 })}</span><span><span class="name">Lab report reader</span><br><span class="meta">Reads a report, checks every number, shows the trend</span></span><span class="chev">${icon('chevronRight')}</span></a>
+        <a class="list-item" style="text-decoration:none" href="/cpr"><span class="avatar av0">${icon('heartPulse', { size: 20 })}</span><span><span class="name">CPR coach (practice)</span><br><span class="meta">Try it before you ever need it</span></span><span class="chev">${icon('chevronRight')}</span></a>
+      </div>
       <div class="section-title">Privacy — plain facts</div>
       <div class="card stack">
         <div class="note">${esc(notice?.status?.claim || 'Prototype. Not compliant, not certified.')}</div>
@@ -549,7 +732,17 @@
         <b>Never sent:</b> Aadhaar, PAN, home address, email, insurance details, document photos.</p>
         <p class="small muted">Every time a hospital opens your details it is listed under "Who viewed my data" (Profiles tab).</p>
       </div>
+      ${S.family.isDemo ? `<div class="section-title">Demo</div>
+      <div class="card stack"><p class="small muted">Closes every open emergency and puts the fictional hospitals back to their starting settings, so you can run the demo again from the start.</p>
+        <button class="btn ghost" id="reset">Reset demo</button></div>` : ''}
       <div style="margin-top:14px"><button class="btn tan" id="out">Sign out of this phone</button></div>`;
+    if ($('#reset')) $('#reset').onclick = async () => {
+      if (!confirm('Reset the demo? Open emergencies close and hospitals go back to their starting settings.')) return;
+      try {
+        const r = await api('POST', '/v1/demo/reset', {});
+        S.em = null; stopDrive(); toast(`Demo reset — closed ${r.closed} emergency(s). Ready to start again.`); go('home');
+      } catch (er) { toast(er.message); }
+    };
     $('#out').onclick = () => { if (confirm('Sign out of this phone?')) signOut(); };
   }
 

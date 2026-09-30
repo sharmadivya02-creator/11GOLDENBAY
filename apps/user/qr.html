@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>GoldenBay · Emergency info</title>
+<link rel="stylesheet" href="/common/gb.css">
+</head>
+<body class="app">
+<div class="phone"><div class="screen"><div class="pad" id="app" style="padding-top:20px"></div></div></div>
+<script src="/common/icons.js"></script>
+<script src="/common/gb.js"></script>
+<script>
+// The page a stranger sees after scanning someone's lock-screen QR.
+// Shows only what helps in the first minutes: blood group, allergies, and a way
+// to reach the family (the number appears only after a tap, and that tap is
+// recorded for the family to see).
+(async () => {
+  const { esc } = GBX;
+  const token = location.pathname.split('/').pop();
+  const el = document.getElementById('app');
+  const head = `<div class="row" style="gap:12px"><div class="logo">${icon('heartPulse', { size: 24 })}</div><div><div style="font-weight:800;font-size:19px">Emergency info</div><div class="small muted">From GoldenBay · demo prototype</div></div></div>`;
+  let d;
+  try {
+    const r = await fetch('/v1/q/' + encodeURIComponent(token));
+    d = await r.json();
+    if (!r.ok) throw new Error(d?.error?.message || 'Not available');
+  } catch (e) {
+    el.innerHTML = head + `<div class="card" style="margin-top:16px"><h2>Not available</h2><p style="margin-top:8px">${esc(e.message)}</p></div>
+      <a class="btn" style="margin-top:16px;width:100%" href="tel:112">Call 112</a>`;
+    return;
+  }
+  el.innerHTML = head + `
+    <a class="btn huge" style="margin-top:18px;width:100%" href="tel:112">${icon('phone', { size: 20 })}&nbsp; Call 112 first</a>
+    <div class="card stack" style="margin-top:16px">
+      <div class="small muted">This phone belongs to</div>
+      <h2 style="font-size:28px">${esc(d.firstName)}</h2>
+      <div><div class="small muted">Blood group</div><div style="font-size:26px;font-weight:800;color:var(--dark)">${esc(d.bloodGroup || 'Not recorded')}</div></div>
+      <div><div class="small muted">Allergies</div>${d.allergies.length ? d.allergies.map((a) => `<div class="allergy" style="margin-top:6px">⚠ ${esc(a)}</div>`).join('') : '<div>None recorded</div>'}</div>
+      <p class="small muted">${esc(d.note)}</p>
+    </div>
+    ${d.hasContact ? `<button class="btn ghost" id="fam" style="margin-top:14px">Show family phone number</button><div id="famOut"></div>` : ''}
+    <p class="small muted" style="margin-top:16px">Opening this page and showing the number are recorded, and the family can see it.</p>`;
+  const b = document.getElementById('fam');
+  if (b) b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const r = await fetch('/v1/q/' + encodeURIComponent(token) + '/contact', { method: 'POST' });
+      const c = await r.json();
+      if (!r.ok) throw new Error(c?.error?.message || 'Not available');
+      document.getElementById('famOut').innerHTML = `<a class="btn ok" style="margin-top:10px;width:100%" href="tel:${esc(c.phone)}">Call ${esc(c.name)} (${esc(c.relation)}) · ${esc(c.phone)}</a>`;
+      b.remove();
+    } catch (e) { b.disabled = false; GBX.toast(e.message); }
+  };
+})();
+</script>
+</body>
+</html>
