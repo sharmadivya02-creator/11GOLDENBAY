@@ -319,3 +319,12 @@ body.app { height: 100vh; height: 100dvh; overflow: hidden; }
 .phone > .demo-banner { font-size: 12.5px; padding: 8px 11px; margin: 0 18px 4px; }
 .pad > .section-title, .screen .section-title { margin: 22px 0 10px; display: block; }
 .section-head .section-title, .section-head h2 { margin: 0; }
+
+/* hospital top bar on small phones: name on one line, buttons never wrap */
+.topbar .grow { min-width: 0; }
+.topbar #hname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar button { white-space: nowrap; flex: none; }
+@media (max-width: 420px) { .topbar { gap: 8px; padding: 10px 12px; } .topbar button { padding: 8px 10px; font-size: 14px; } }
+@media (max-width: 480px) { .topbar #hname { white-space: normal; font-size: 15px; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+@media (max-width: 420px) { .topbar #hname { font-size: 14px; -webkit-line-clamp: 3; } .topbar .sub { display: none; } }

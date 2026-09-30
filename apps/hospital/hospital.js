@@ -64,6 +64,7 @@
     $('#pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#go').click(); });
   }
 
+  window.addEventListener('gb-unauth', () => { if (S.token) { signOut(); toast('You were signed out. Please sign in again.', 5000); } });
   function signOut() {
     S.token = null; keep.del('gb_hospital_token'); S.detail = null; S.knownOffers = new Set();
     showLogin();
@@ -90,7 +91,7 @@
     root.innerHTML = `
       <div class="topbar">
         <div class="logo">${icon('hospital', { size: 22 })}</div>
-        <div class="grow"><div class="brand" id="hname"></div><div class="sub">Hospital App · demo login · fictional hospital</div></div>
+        <div class="grow"><div class="brand" id="hname"></div><div class="sub">Hospital App · demo</div></div>
         <button id="settingsBtn">Services</button>
         <button id="out">Sign out</button>
       </div>

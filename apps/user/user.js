@@ -15,6 +15,7 @@
   const { EMERGENCY_TYPES, COST_PREFERENCES } = GB;
   const ACTIVE = ['SEARCHING', 'NO_ACCEPT_YET', 'ACCEPTED', 'DIVERTED'];
   // Short, everyday headings for each step (the sentence under it comes from the server).
+  const EM_STATE = { SEARCHING: 'Looking for a hospital', ACCEPTED: 'A hospital said yes', ARRIVED: 'Arrived', CANCELLED: 'Cancelled', DIVERTED: 'Moved to another hospital', NO_ACCEPT_YET: 'No hospital yet — told to call 112' };
   const STEP_TITLE = {
     goal: 'Started', mask: 'Kept your details private', send_offers: 'Asking hospitals', widen_search: 'Looking a little further',
     tell_family: 'What to do now', understand: 'Read your message', accepted: 'A hospital said YES', offer_declined: 'A hospital said no',
@@ -42,7 +43,7 @@
   // ---- shared bits of the phone layout
   const initials = (n) => String(n || '?').replace(/\s*\(DEMO\)\s*/i, '').split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   const header = () => `<div class="hdr"><div class="logo">${icon('heartPulse', { size: 26 })}</div>
-      <div class="grow"><div class="brand">GoldenBay<span class="ai-pill ${S.ai === 'gemini' ? 'on' : ''}">${S.ai === 'gemini' ? '✦ Gemini' : 'Rules mode'}</span></div><div class="tagline">Right hospital. Already prepared.</div></div>
+      <div class="grow"><div class="brand">GoldenBay<span class="ai-pill ${S.ai === 'gemini' ? 'on' : ''}">${S.ai === 'gemini' ? '✦ Gemini' : 'Basic'}</span></div><div class="tagline">Ready before you arrive.</div></div>
       <a class="call112" href="tel:112">${icon('phone', { size: 16 })} 112</a></div>`;
   const banner = () => `<div class="demo-banner">${icon('alertTriangle', { size: 18 })}<span>Demo with made-up data — not a real emergency service. Real emergency in India: call <b>112</b>.</span></div>`;
 
@@ -79,6 +80,7 @@
     $('#create').onclick = () => go({ path: '/v1/families', body: { name: $('#fname').value || 'My family', memberLabel: $('#who').value || 'My phone' } });
   }
 
+  window.addEventListener('gb-unauth', () => { if (S.token) { signOut(); toast('You were signed out. Please join again.', 5000); } });
   function signOut() {
     S.token = null; keep.del('gb_family_token'); S.em = null; stopDrive();
     showJoin();
@@ -630,12 +632,14 @@
     back.innerHTML = `<div class="sheet stack"><h2>Privacy & your data</h2>
       <div class="note">${esc(CONSENT[p.consent?.type] || 'Consent not recorded')}</div>
       <p class="small">Hospitals first see a no-name card. Only the hospital that says yes sees ${esc(shortName(p.fullName))}'s medical details — and it shows up in "Who viewed my data". Insurance, Aadhaar, PAN and home address are never sent.</p>
-      <button class="btn ghost" id="exp">Download all of ${esc(shortName(p.fullName))}'s data</button>
+      <button class="btn ghost" id="exp">View all of ${esc(shortName(p.fullName))}'s data (readable, can be printed)</button>
+      <button class="btn ghost" id="expraw">Download the same data as a computer file (JSON)</button>
       <button class="btn ghost" id="era" style="color:var(--dark)">Erase this profile and everything linked to it</button>
       <button class="btn tan" id="close">Close</button></div>`;
     host().appendChild(back);
     back.querySelector('#close').onclick = () => back.remove();
     back.querySelector('#exp').onclick = () => exportProfile(p.id);
+    back.querySelector('#expraw').onclick = () => exportProfile(p.id, 'raw');
     back.querySelector('#era').onclick = async () => {
       if (!confirm('Delete this profile and every record linked to it? This cannot be undone.')) return;
       try { await api('DELETE', `/v1/privacy/erase/${p.id}`); await loadProfiles(); back.remove(); S.profileView = null; toast('Erased.'); drawTab(); } catch (e) { toast(e.message); }
@@ -655,12 +659,55 @@
     } catch (e) { toast(e.message); }
   }
 
-  async function exportProfile(id) {
+  // Readable copy of everything held about one person (opens as a normal page; can be printed / saved as PDF)
+  function readablePage(d) {
+    const p = d.profile || {};
+    const list = (a) => (a && a.length ? a.map((x) => `<li>${esc(x)}</li>`).join('') : '<li class="none">None recorded</li>');
+    const when = (t) => (t ? new Date(t).toLocaleString('en-IN') : '—');
+    const c = (p.emergencyContacts || [])[0];
+    const ems = (d.emergencies || []).map((e) => `<tr><td>${esc(when(e.createdAt))}</td><td>${esc((e.types || []).map((t) => (GB.EMERGENCY_TYPES.find((x) => x.id === t) || { label: t }).label).join(', ') || '—')}</td><td>${esc(EM_STATE[e.status] || e.status || '—')}</td></tr>`).join('');
+    const labs = (d.labReports || []).map((r) => `<tr><td>${esc(r.reportDate || when(r.createdAt))}</td><td>${esc(r.labName || 'Lab report')} · ${(r.values || []).length} values</td></tr>`).join('');
+    const views = (d.whoViewedThisData || []).map((a) => `<tr><td>${esc(when(a.at))}</td><td>${esc(a.hospitalName || '—')}</td><td>${esc(a.what || '')}</td></tr>`).join('');
+    const docs = (p.documents || []).map((x) => `<figure><img alt="${esc(x.name)}" src="${esc(x.dataUrl || '')}"><figcaption>${esc(x.name)} · ${esc(x.category || '')}</figcaption></figure>`).join('');
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(p.fullName || 'Profile')} — my GoldenBay data</title>
+<style>body{font:16px/1.5 system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:#f7f3ec;color:#2a2018}main{max-width:720px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:26px;margin:.2em 0}h2{font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:#8c0303;margin:26px 0 8px;border-bottom:2px solid #e3dac9;padding-bottom:4px}
+.card{background:#fff;border:1px solid #e3dac9;border-radius:14px;padding:12px 16px}ul{margin:0;padding-left:20px}.none{color:#8a7d6e}li.none{list-style:none;margin-left:-20px}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:7px 6px;border-bottom:1px solid #eee5d6;vertical-align:top}
+.k{color:#8a7d6e;font-size:13px}.note{background:#fff7e0;border:1px solid #e8d38a;border-radius:12px;padding:10px 14px;font-size:14px}
+figure{margin:0 0 12px}img{max-width:100%;border:1px solid #e3dac9;border-radius:10px}figcaption{font-size:13px;color:#8a7d6e}
+button{font:inherit;background:#a61414;color:#fff;border:0;border-radius:12px;padding:12px 18px;margin:8px 8px 0 0}
+@media print{button,.noprint{display:none}body{background:#fff}}</style></head><body><main>
+<div class="noprint"><button onclick="window.print()">Print or save as PDF</button></div>
+<p class="k">GoldenBay · copy made ${esc(when(d.exportedAt))}</p><h1>${esc(p.fullName || 'Profile')}</h1>
+<p class="k">${esc(p.relation || '')}${p.age != null ? ` · Age ${esc(p.age)}` : ''}${p.sex ? ` · ${esc(p.sex)}` : ''}</p>
+<div class="note">${esc(d.aboutThisFile || '')}</div>
+<h2>Medical details</h2><div class="card"><p><span class="k">Blood group</span><br><b>${esc(p.bloodGroup || 'Not recorded')}</b></p>
+<p class="k" style="margin-bottom:2px">Allergies</p><ul>${list(p.allergies)}</ul><p class="k" style="margin-bottom:2px">Medicines</p><ul>${list(p.medications)}</ul>
+<p class="k" style="margin-bottom:2px">Conditions</p><ul>${list(p.conditions)}</ul><p class="k" style="margin-bottom:2px">Past events</p><ul>${list(p.pastEvents)}</ul>
+<p class="k">Medical details last updated: ${esc(when(p.medicalUpdatedAt))}</p></div>
+<h2>Emergency contact</h2><div class="card">${c ? `<b>${esc(c.name)}</b>${c.relation ? ` (${esc(c.relation)})` : ''}<br>${esc(c.phone)}` : '<span class="none">None recorded</span>'}</div>
+<h2>Other details</h2><div class="card"><p><span class="k">Insurance (never sent to hospitals)</span><br>${esc(p.insurance || 'Not recorded')}</p>
+<p><span class="k">Consent</span><br>${esc(CONSENT[p.consent?.type] || 'Not recorded')} · ${esc(when(p.consent?.at))}</p></div>
+<h2>Documents (${(p.documents || []).length})</h2>${docs || '<div class="card none">No documents</div>'}
+<h2>Emergencies (${(d.emergencies || []).length})</h2>${ems ? `<table><tr><th>When</th><th>What</th><th>Result</th></tr>${ems}</table>` : '<div class="card none">None</div>'}
+<h2>Lab reports (${(d.labReports || []).length})</h2>${labs ? `<table><tr><th>When</th><th>Report</th></tr>${labs}</table>` : '<div class="card none">None</div>'}
+<h2>Who viewed this data (${(d.whoViewedThisData || []).length})</h2>${views ? `<table><tr><th>When</th><th>Who</th><th>What</th></tr>${views}</table>` : '<div class="card none">Nobody yet</div>'}
+</main></body></html>`;
+  }
+
+  async function exportProfile(id, kind = 'readable') {
     try {
       const data = await api('GET', `/v1/privacy/export/${id}`);
+      const safe = (data.profile?.fullName || 'profile').replace(/[^\w]+/g, '-').toLowerCase();
+      const isRaw = kind === 'raw';
+      const blob = isRaw
+        ? new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        : new Blob([readablePage(data)], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      if (!isRaw) { const w = window.open(url, '_blank'); if (w) return; }
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-      a.download = 'my-goldenbay-data.json'; a.click();
+      a.href = url; a.download = `goldenbay-${safe}.${isRaw ? 'json' : 'html'}`; document.body.appendChild(a); a.click(); a.remove();
     } catch (e) { toast(e.message); }
   }
 
@@ -715,7 +762,7 @@
       <div class="section-title" style="margin-top:16px">Your family</div>
       <div class="card stack">
         <h2>${esc(S.family.name)}</h2>
-        <div class="small muted">This phone: ${esc(S.me.label)}</div><div>Family code: <b style="font-size:22px;letter-spacing:.06em">${esc(S.family.joinCode)}</b></div>
+        <div class="small muted">This phone: ${esc(S.me.label)}</div><div>Family code: <b style="font-size:20px;letter-spacing:.04em;white-space:nowrap">${esc(S.family.joinCode)}</b></div>
         <p class="small muted">Relatives use this code to join. Each phone gets its own secret key.</p>
         <div>${S.members.map((m) => `<span class="chip">${esc(m.label)}</span>`).join('')}</div>
       </div>

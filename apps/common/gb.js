@@ -21,17 +21,24 @@ const GBX = (() => {
   };
 
   // JSON API caller. `headers()` returns the sign-in header for this app.
-  function makeApi(headers) {
+  const niceMsg = (m) => { if (!m) return ''; m = String(m); const map = { 'join code not found': 'That family code was not found. Check it and try again.', 'full name is required': 'Please type a name.', 'family sign-in required': 'Please sign in again.', 'hospital sign-in required': 'Please sign in again.', 'wrong PIN': 'Wrong PIN. Ask the demo host for the PIN.', 'too many attempts — wait a few minutes': 'Too many tries. Please wait a few minutes.' }; return map[m] || (m[0].toUpperCase() + m.slice(1)); };
+function makeApi(headers) {
     return async function api(method, path, body) {
-      const res = await fetch(path, {
-        method,
-        headers: { 'Content-Type': 'application/json', ...(headers() || {}) },
-        body: body ? JSON.stringify(body) : undefined,
-      });
+      let res;
+      try {
+        res = await fetch(path, {
+          method,
+          headers: { 'Content-Type': 'application/json', ...(headers() || {}) },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch {
+        const err = new Error('No internet connection. Check your network and try again.'); err.offline = true; throw err;
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = new Error(data?.error?.message || `Something went wrong (${res.status})`);
+        const err = new Error(niceMsg(data?.error?.message) || `Something went wrong (${res.status}). Please try again.`);
         err.status = res.status; err.code = data?.error?.code;
+        if (res.status === 401 && err.code === 'NOT_SIGNED_IN') window.dispatchEvent(new CustomEvent('gb-unauth'));
         throw err;
       }
       return data;

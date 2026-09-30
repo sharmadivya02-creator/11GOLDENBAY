@@ -84,8 +84,8 @@ function exportEverything(profileId) {
     exportedAt: new Date().toISOString(),
     noticeVersion: NOTICE_VERSION,
     aboutThisFile:
-      'Everything GoldenBay holds about this person. Nothing is kept anywhere else. ' +
-      'Live video from the CPR Co-Pilot is never stored, so it does not appear here.',
+      'Everything this GoldenBay demo holds about this person. ' +
+      'Live video from the CPR coach is never stored, so it does not appear here.',
     profile,
     emergencies,
     labReports,
