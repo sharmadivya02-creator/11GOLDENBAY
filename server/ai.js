@@ -72,9 +72,22 @@ function geminiEnabled() {
   return !mock && !!key && !key.startsWith('paste-');
 }
 
+// Google sometimes answers 503 "model is experiencing high demand" (or 429).
+// Try once more after a short pause — on GEMINI_FALLBACK_MODEL if you set one,
+// otherwise on the same model. Hospitals are already being asked while this
+// runs, so a slow or failed answer never delays the search.
 async function callGemini(parts) {
-  // gemini-2.5-flash was retired for new keys — 3.6-flash is the current fast model.
-  const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const main = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  try {
+    return await callGeminiOnce(parts, main);
+  } catch (err) {
+    if (!/HTTP (503|429|500)/.test(String(err.message))) throw err;
+    await new Promise((r) => setTimeout(r, 800));
+    return callGeminiOnce(parts, process.env.GEMINI_FALLBACK_MODEL || main);
+  }
+}
+
+async function callGeminiOnce(parts, model) {
 
   // Fail fast instead of hanging: if Gemini doesn't respond within 12s,
   // abort and let the caller fall back to the mock response. Without this,

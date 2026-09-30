@@ -283,7 +283,7 @@ function register(r) {
       .map((o) => views.level1Card(store.find('emergencies', o.emergencyId), o, h))
       .sort((a, b) => (a.sentAt < b.sentAt ? 1 : -1));
     const incoming = store.all('emergencies').filter((e) => e.receivingHospitalId === h.id && ['ACCEPTED', 'DIVERTED'].includes(e.status))
-      .map((e) => ({ emergencyId: e.id, ref: e.id.slice(0, 6).toUpperCase(), status: e.status, urgency: e.urgency, diverted: e.divertedTo?.hospitalId === h.id, acceptedAt: e.acceptedAt || e.divertedTo?.at }));
+      .map((e) => ({ emergencyId: e.id, ref: e.id.slice(0, 6).toUpperCase(), status: e.status, urgency: e.urgency, diverted: e.divertedTo?.hospitalId === h.id, simulated: !!e.simulatedAccept, acceptedAt: e.acceptedAt || e.divertedTo?.at }));
     const recent = mine.filter((o) => o.status !== 'pending').slice(-20).reverse()
       .map((o) => ({ offerId: o.id, ref: o.emergencyId.slice(0, 6).toUpperCase(), status: o.status, reason: o.closedReason || o.declineReason || null }));
     return { pending, incoming, recent };

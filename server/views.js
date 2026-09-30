@@ -132,7 +132,7 @@ function familyView(e) {
     hospital: hospitalBrief(receiving),
     divertedTo: e.divertedTo || null,
     fallback: e.fallback || null,
-    timeToAcceptSec: e.timeToAcceptSec ?? null,
+    timeToAcceptSec: e.timeToAcceptSec ?? null, simulatedAccept: !!e.simulatedAccept,
     acceptedAt: e.acceptedAt || null, arrivedAt: e.arrivedAt || null,
     sharePath: `/share/${e.shareToken}`,
     log: (e.log || []).slice(-60),

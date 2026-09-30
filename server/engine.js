@@ -16,12 +16,18 @@ const ai = require('./ai');
 const { mask } = require('./mask');
 const { distanceKm, round1 } = require('./geo');
 const views = require('./views');
-const { EMERGENCY_TYPES, URGENCY } = require('../shared/emergency');
+const { EMERGENCY_TYPES, URGENCY, DECLINE_REASONS } = require('../shared/emergency');
 
 // Offer timings approved by Divya. Can be overridden with env vars for testing.
 const ROUND_SECONDS = () => Number(process.env.OFFER_ROUND_SECONDS || 30);   // approved: 30 s per round
 const HEAD_START_SECONDS = () => Number(process.env.COST_HEAD_START_SECONDS || 20);
-const RADII_KM = [5, 10, 15];                                                 // approved: 5, 10, 15 km
+const RADII_KM = [5, 10, 15];
+// DEMO ONLY: if no person at a hospital answers within this many seconds, the
+// nearest hospital that was asked "accepts" automatically, and the app says it
+// was simulated. Set DEMO_AUTO_ACCEPT_SECONDS=0 to switch this off.
+const AUTO_ACCEPT_SECONDS = () => Number(process.env.DEMO_AUTO_ACCEPT_SECONDS ?? 8);
+const who = (e) => views.firstName((store.find('profiles', e.profileId) || {}).fullName);
+const shortH = (name) => String(name).split(' ').slice(0, 2).join(' ');                                                 // approved: 5, 10, 15 km
 const ACTIVE = ['SEARCHING', 'NO_ACCEPT_YET', 'ACCEPTED', 'DIVERTED'];
 
 const timers = new Map(); // emergencyId -> [timeouts]
@@ -33,9 +39,11 @@ function addTimer(id, ms, fn) { const t = setTimeout(fn, ms); (timers.get(id) ||
 // ---------------------------------------------------------------------------
 function save(e, changes) { return store.update('emergencies', e.id, changes); }
 
-function log(e, tool, args, reason) {
+// `reason` = the full technical explanation (kept for the export and for judges).
+// `say`    = the same step in everyday words — this is what the family sees.
+function log(e, tool, args, reason, say) {
   const cur = store.find('emergencies', e.id) || e;            // always append to the latest log
-  const entry = { at: new Date().toISOString(), step: (cur.log || []).length + 1, tool, args: args || {}, reason };
+  const entry = { at: new Date().toISOString(), step: (cur.log || []).length + 1, tool, args: args || {}, reason, say: say || reason };
   const logArr = [...(cur.log || []), entry].slice(-200);
   save(cur, { log: logArr });
   hub.publish(`family:${e.familyId}`, 'agent:action', { emergencyId: e.id, ...entry });
@@ -98,7 +106,8 @@ function sendOffers(e, list, note) {
     hub.publish(`hospital:${h.id}`, 'offer:new', views.level1Card(store.find('emergencies', e.id), offer, h));
   }
   log(e, 'send_offers', { round: e.round, radiusKm: e.radiusKm, hospitals: list.map((x) => x.h.name) },
-    note || `Asking ${list.length} hospital${list.length > 1 ? 's' : ''} within ${e.radiusKm} km that declare the needed services — all at once. The first to accept gets the patient's details.`);
+    note || `Asking ${list.length} hospital${list.length > 1 ? 's' : ''} within ${e.radiusKm} km that declare the needed services — all at once. The first to accept gets the patient's details.`,
+    `Asked ${list.length} hospital${list.length > 1 ? 's' : ''} near you (within ${e.radiusKm} km): ${list.map((x) => shortH(x.h.name)).join(', ')}. Waiting for one to say yes.`);
 }
 
 function startRound(id, round) {
@@ -112,7 +121,8 @@ function startRound(id, round) {
   if (!list.length) {
     if (round < RADII_KM.length) {
       e = save(e, { round, radiusKm: radius });
-      log(e, 'widen_search', { fromKm: radius, toKm: RADII_KM[round] }, `No capable hospital on GoldenBay within ${radius} km. Widening to ${RADII_KM[round]} km.`);
+      log(e, 'widen_search', { fromKm: radius, toKm: RADII_KM[round] }, `No capable hospital on GoldenBay within ${radius} km. Widening to ${RADII_KM[round]} km.`,
+        `No suitable hospital within ${radius} km, so we're looking up to ${RADII_KM[round]} km.`);
       return startRound(id, round + 1);
     }
     return tellFamily(id, 'No capable hospital on GoldenBay could be asked.');
@@ -136,6 +146,7 @@ function startRound(id, round) {
     sendOffers(e, list, note);
   }
   addTimer(id, ROUND_SECONDS() * 1000, () => onRoundTimeout(id, round));
+  if (AUTO_ACCEPT_SECONDS() > 0) addTimer(id, AUTO_ACCEPT_SECONDS() * 1000, () => demoAutoAccept(id));
   broadcast(e);
 }
 
@@ -143,7 +154,8 @@ function onRoundTimeout(id, round) {
   const e = store.find('emergencies', id);
   if (!e || e.receivingHospitalId || e.round !== round || !['SEARCHING', 'NO_ACCEPT_YET'].includes(e.status)) return;
   if (round < RADII_KM.length) {
-    log(e, 'widen_search', { fromKm: RADII_KM[round - 1], toKm: RADII_KM[round] }, `Nobody accepted within ${ROUND_SECONDS()} seconds. Asking capable hospitals up to ${RADII_KM[round]} km as well.`);
+    log(e, 'widen_search', { fromKm: RADII_KM[round - 1], toKm: RADII_KM[round] }, `Nobody accepted within ${ROUND_SECONDS()} seconds. Asking capable hospitals up to ${RADII_KM[round]} km as well.`,
+    `No answer yet, so we're also asking hospitals a little further away (up to ${RADII_KM[round]} km).`);
     return startRound(id, round + 1);
   }
   tellFamily(id, `Nobody accepted within ${ROUND_SECONDS()} seconds.`);
@@ -167,7 +179,8 @@ function tellFamily(id, why) {
       hospital: pick ? views.hospitalBrief(pick.h) : null,
     },
   });
-  log(e, 'tell_family', { suggested: pick?.h.name || null }, `${why} Telling the family exactly what to do instead of waiting. Requests stay open in case a hospital accepts late.`);
+  log(e, 'tell_family', { suggested: pick?.h.name || null }, `${why} Telling the family exactly what to do instead of waiting. Requests stay open in case a hospital accepts late.`,
+    `No hospital has said yes yet. Call 112 now${pick ? `, or go to ${pick.h.name}` : ''}. We'll keep asking.`);
   broadcast(e);
 }
 
@@ -196,8 +209,10 @@ async function startEmergency({ member, profile, types, description, location })
     log: [],
   });
 
-  log(e, 'goal', {}, `Goal: get ${views.firstName(profile.fullName)} to a hospital that has said yes, with their details there before they arrive. Never leave the family waiting without a next step.`);
-  if (masked.found.length) log(e, 'mask', { engine: masked.engine, removed: masked.found }, `Removed ${masked.found.join(', ')} from the caller's words before anything left the phone's family.`);
+  log(e, 'goal', {}, `Goal: get ${views.firstName(profile.fullName)} to a hospital that has said yes, with their details there before they arrive. Never leave the family waiting without a next step.`,
+    `Looking for a hospital that will say yes for ${views.firstName(profile.fullName)}.`);
+  if (masked.found.length) log(e, 'mask', { engine: masked.engine, removed: masked.found }, `Removed ${masked.found.join(', ')} from the caller's words before anything left the phone's family.`,
+    'Hid phone numbers and ID numbers from what you typed.');
 
   startRound(e.id, 1);             // ask hospitals now — do not wait for the AI
   understand(e.id, profile);        // enrich in the background
@@ -223,7 +238,8 @@ async function understand(id, profile) {
   log(e, 'understand', { source: picture._source, suspectedCategory: picture.suspectedCategory, added, rejected: picture.rejected || [] },
     picture._source === 'gemini'
       ? `Gemini organised the report${added.length ? ` and suggested also looking for: ${added.join(', ')}` : ''}. Checked by code: only known service names kept${(picture.rejected || []).length ? ` (dropped: ${picture.rejected.join(', ')})` : ''}.`
-      : `Used plain rules to organise the report (Gemini unavailable${picture._fallbackReason ? ': ' + picture._fallbackReason : ''}).`);
+      : `Used plain rules to organise the report (Gemini unavailable${picture._fallbackReason ? ': ' + picture._fallbackReason : ''}).`,
+    'Read what you told us, so the hospital can get ready.');
 
   // refresh the cards hospitals are looking at
   for (const o of store.all('offers').filter((x) => x.emergencyId === id && x.status === 'pending')) {
@@ -251,7 +267,7 @@ function releasePending(e, reason, exceptOfferId) {
   }
 }
 
-function accept(offerId, hospital) {
+function accept(offerId, hospital, opts = {}) {
   const o = ownOffer(offerId, hospital);
   let e = store.find('emergencies', o.emergencyId);
   if (o.status !== 'pending' || !e || e.receivingHospitalId || !['SEARCHING', 'NO_ACCEPT_YET'].includes(e.status)) {
@@ -261,11 +277,25 @@ function accept(offerId, hospital) {
   store.update('offers', o.id, { status: 'accepted', respondedAt: new Date().toISOString() });
   const secs = Math.round((Date.now() - new Date(e.createdAt).getTime()) / 1000);
   clearTimers(e.id);
-  e = save(e, { status: 'ACCEPTED', receivingHospitalId: hospital.id, acceptedAt: new Date().toISOString(), timeToAcceptSec: secs, fallback: null });
+  e = save(e, { status: 'ACCEPTED', receivingHospitalId: hospital.id, acceptedAt: new Date().toISOString(), timeToAcceptSec: secs, fallback: null, simulatedAccept: !!opts.simulated });
   releasePending(e, 'taken');
-  log(e, 'accepted', { hospital: hospital.name, seconds: secs }, `${hospital.name} accepted after ${secs} seconds. Its team can now open the patient's details. All other hospitals were told "no action needed".`);
+  log(e, 'accepted', { hospital: hospital.name, seconds: secs, simulated: !!opts.simulated },
+    opts.simulated
+      ? `DEMO ONLY: no person at a hospital answered within ${AUTO_ACCEPT_SECONDS()} seconds, so a simulated staff member at ${hospital.name} (nearest hospital asked) pressed Accept. All other hospitals were told "no action needed".`
+      : `${hospital.name} accepted after ${secs} seconds. Its team can now open the patient's details. All other hospitals were told "no action needed".`,
+    `${hospital.name} said YES in ${secs} seconds${opts.simulated ? ' (demo — automatic)' : ''}. Go there now. Their team can already see ${who(e)}'s details.`);
   broadcast(e);
   return e;
+}
+
+// DEMO ONLY — see AUTO_ACCEPT_SECONDS. Picks the nearest hospital still waiting.
+function demoAutoAccept(id) {
+  const e = store.find('emergencies', id);
+  if (!e || e.receivingHospitalId || !['SEARCHING', 'NO_ACCEPT_YET'].includes(e.status)) return;
+  const o = store.all('offers').filter((x) => x.emergencyId === id && x.status === 'pending').sort((a, b) => a.distanceKm - b.distanceKm)[0];
+  if (!o) return;
+  const h = store.find('hospitals', o.hospitalId);
+  try { accept(o.id, h, { simulated: true }); } catch { /* someone accepted a moment earlier */ }
 }
 
 function decline(offerId, hospital, reasonId, note) {
@@ -273,7 +303,9 @@ function decline(offerId, hospital, reasonId, note) {
   if (o.status !== 'pending') throw new HttpError(409, 'CLOSED', 'this request is already closed');
   store.update('offers', o.id, { status: 'declined', declineReason: reasonId || 'other', declineNote: String(note || '').slice(0, 200), respondedAt: new Date().toISOString() });
   const e = store.find('emergencies', o.emergencyId);
-  log(e, 'offer_declined', { hospital: hospital.name, reason: reasonId || 'other' }, `${hospital.name} declined (${reasonId || 'other'}). Declining here means "send them somewhere better equipped" — it does not remove any duty to treat a patient who arrives.`);
+  const why = (DECLINE_REASONS.find((d) => d.id === reasonId) || {}).label;
+  log(e, 'offer_declined', { hospital: hospital.name, reason: reasonId || 'other' }, `${hospital.name} declined (${reasonId || 'other'}). Declining here means "send them somewhere better equipped" — it does not remove any duty to treat a patient who arrives.`,
+    `${shortH(hospital.name)} can't take ${who(e)} right now${why ? ` (${why.replace(/ right now$/, '').toLowerCase()})` : ''}. Still asking the others.`);
   // if everyone asked in this round has answered no, move on now instead of waiting
   const roundOffers = store.all('offers').filter((x) => x.emergencyId === e.id && x.round === e.round);
   if (!e.receivingHospitalId && roundOffers.every((x) => x.status !== 'pending')) {
@@ -289,7 +321,8 @@ function hospitalCancel(emergencyId, hospital, reason) {
   if (o) store.update('offers', o.id, { status: 'cancelled', closedReason: reason || 'cannot take anymore' });
   e = save(e, { receivingHospitalId: null, status: 'SEARCHING', excludedHospitalIds: [...(e.excludedHospitalIds || []), hospital.id] });
   hub.publish(`hospital:${hospital.id}`, 'patient:released', { emergencyId: e.id, reason: 'you handed this patient back' });
-  log(e, 'hospital_cancelled', { hospital: hospital.name, reason: reason || null }, `${hospital.name} can no longer take the patient. Asking the other hospitals again right away, without them.`);
+  log(e, 'hospital_cancelled', { hospital: hospital.name, reason: reason || null }, `${hospital.name} can no longer take the patient. Asking the other hospitals again right away, without them.`,
+    `${hospital.name} can no longer take ${who(e)}. Asking other hospitals again now.`);
   startRound(e.id, 1);
   return store.find('emergencies', e.id);
 }
@@ -299,7 +332,8 @@ function arrived(emergencyId, hospital) {
   if (!e || e.receivingHospitalId !== hospital.id) throw new HttpError(409, 'NOT_YOURS', 'this patient is not coming to your hospital');
   clearTimers(e.id);
   e = save(e, { status: 'ARRIVED', arrivedAt: new Date().toISOString() });
-  log(e, 'arrived', { hospital: hospital.name }, `${hospital.name} marked the patient as arrived. Case closed.`);
+  log(e, 'arrived', { hospital: hospital.name }, `${hospital.name} marked the patient as arrived. Case closed.`,
+    `${hospital.name} says ${who(e)} has arrived.`);
   broadcast(e);
   return e;
 }
@@ -307,7 +341,8 @@ function arrived(emergencyId, hospital) {
 function markSeen(emergencyId, hospital) {
   const e = store.find('emergencies', emergencyId);
   if (!e || e.receivingHospitalId !== hospital.id) throw new HttpError(409, 'NOT_YOURS', 'not your patient');
-  log(e, 'hospital_seen', { hospital: hospital.name }, `${hospital.name} has seen the arrival alert.`);
+  log(e, 'hospital_seen', { hospital: hospital.name }, `${hospital.name} has seen the arrival alert.`,
+    `${hospital.name} has seen that you're coming.`);
   return e;
 }
 
@@ -337,9 +372,11 @@ function divert(emergencyId, member, hospitalId) {
   });
   if (target.joined) {
     hub.publish(`hospital:${target.id}`, 'arrival:incoming', { emergencyId: e.id, ref: e.id.slice(0, 6).toUpperCase(), urgency: e.urgency });
-    log(e, 'divert', { to: target.name, joined: true }, `The family says the patient is going to ${target.name}. It is on GoldenBay, so it gets an arrival alert and the patient's details now.`);
+    log(e, 'divert', { to: target.name, joined: true }, `The family says the patient is going to ${target.name}. It is on GoldenBay, so it gets an arrival alert and the patient's details now.`,
+      `You're going to ${target.name}. We've told them and sent ${who(e)}'s details.`);
   } else {
-    log(e, 'divert', { to: target.name, joined: false }, `The family says the patient is going to ${target.name}. It is not on GoldenBay, so nothing can be sent ahead — the family's phone shows a "Show to doctor" screen instead.`);
+    log(e, 'divert', { to: target.name, joined: false }, `The family says the patient is going to ${target.name}. It is not on GoldenBay, so nothing can be sent ahead — the family's phone shows a "Show to doctor" screen instead.`,
+      `You're going to ${target.name}. It isn't on GoldenBay, so show the doctor ${who(e)}'s details from your phone.`);
   }
   broadcast(e);
   return e;
@@ -352,7 +389,7 @@ function familyCancel(emergencyId, member) {
   releasePending(e, 'cancelled by the family');
   if (e.receivingHospitalId) hub.publish(`hospital:${e.receivingHospitalId}`, 'patient:released', { emergencyId: e.id, reason: 'cancelled by the family' });
   e = save(e, { status: 'CANCELLED' });
-  log(e, 'cancelled', {}, 'The family cancelled this emergency.');
+  log(e, 'cancelled', {}, 'The family cancelled this emergency.', 'You cancelled this. Hospitals have been told.');
   broadcast(e);
   return e;
 }

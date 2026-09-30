@@ -143,7 +143,7 @@
     const inc = S.incoming.map((x) => `
       <div class="card row spread" data-open="${esc(x.emergencyId)}" style="cursor:pointer;border-left:6px solid var(--ok)">
         <div><b>Patient on the way · #${esc(x.ref)}</b>
-          <div class="small muted">${x.diverted ? 'Family chose this hospital' : 'You accepted'} · ${esc(x.status)}</div></div>
+          <div class="small muted">${x.diverted ? 'Family chose this hospital' : x.simulated ? 'Accepted automatically (demo — no one answered in time)' : 'You accepted'} · ${esc(x.status)}</div></div>
         <button class="btn small ok" data-open="${esc(x.emergencyId)}">Open</button>
       </div>`).join('');
     const rec = S.recent.map((x) => `<div class="logline"><b>#${esc(x.ref)}</b> · ${esc(labelStatus(x))}</div>`).join('');

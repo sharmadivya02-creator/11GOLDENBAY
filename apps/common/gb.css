@@ -234,3 +234,5 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 .btn.white.wait-t { color: var(--wait); }
 .btn.linew { background: transparent; color: #fff; border: 1.5px solid #fff; }
 .hospital-page { background: var(--page); }
+
+.logtitle { font-weight: 750; color: var(--ink); }

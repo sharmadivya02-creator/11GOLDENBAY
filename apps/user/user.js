@@ -14,6 +14,12 @@
   const { esc, toast, keep, makeApi, goLive, mmss, secSince, chips, fmtDate } = GBX;
   const { EMERGENCY_TYPES, COST_PREFERENCES } = GB;
   const ACTIVE = ['SEARCHING', 'NO_ACCEPT_YET', 'ACCEPTED', 'DIVERTED'];
+  // Short, everyday headings for each step (the sentence under it comes from the server).
+  const STEP_TITLE = {
+    goal: 'Started', mask: 'Kept your details private', send_offers: 'Asking hospitals', widen_search: 'Looking a little further',
+    tell_family: 'What to do now', understand: 'Read your message', accepted: 'A hospital said YES', offer_declined: 'A hospital said no',
+    hospital_cancelled: 'A hospital pulled out', arrived: 'Arrived', hospital_seen: 'The hospital is ready', divert: 'Changed hospital', cancelled: 'Cancelled',
+  };
 
   const S = {
     token: keep.get('gb_family_token'),
@@ -306,7 +312,7 @@
         <p class="small" style="margin-top:10px">We keep asking in the background. If one says yes, this screen changes.</p></div>`;
     } else if (e.status === 'ACCEPTED') {
       const h = e.hospital;
-      box = `<div class="status-box ok"><h2>✔ ${esc(h.name)} said yes</h2>
+      box = `<div class="status-box ok">${e.simulatedAccept ? '<span class="tag" style="background:rgba(255,255,255,.2);color:#fff;margin-bottom:8px">DEMO · AUTOMATIC ACCEPT</span>' : ''}<h2>✔ ${esc(h.name)} said yes</h2>
         <p>${e.timeToAcceptSec != null && e.timeToAcceptSec >= 1 ? 'Said yes in ' + esc(e.timeToAcceptSec) + ' seconds.' : 'Said yes right away.'} Their team can see ${esc(e.patient.firstName)}'s details now — go there.</p>
         <div class="row wrap" style="margin-top:12px">
           <a class="btn white ok-t small" target="_blank" rel="noopener" href="${esc(h.navigateUrl)}">Navigate</a>
@@ -331,8 +337,8 @@
         ${box}
         ${e.picture?.questionsForCaller?.length ? `<div class="card"><h3>The hospital may ask you</h3>${e.picture.questionsForCaller.map((q) => `<div class="note" style="margin-top:8px">${esc(q)}</div>`).join('')}</div>` : ''}
         <div class="card">
-          <div class="row spread"><h3>What the agent is doing</h3><button class="btn small tan" id="togLog">${S.showLog ? 'Hide' : 'Show'}</button></div>
-          ${S.showLog ? (e.log || []).slice().reverse().map((l) => `<div class="logline"><b>${esc(l.tool.replace(/_/g, ' '))}</b> — ${esc(l.reason)}</div>`).join('') : '<p class="small muted" style="margin-top:6px">Every step is written in plain words, so you can see why it did what it did.</p>'}
+          <div class="row spread"><h3>What's happening</h3>${(e.log || []).length > 1 ? `<button class="link" id="togLog">${S.showLog ? 'Show less' : 'Show all steps'}</button>` : ''}</div>
+          ${(S.showLog ? (e.log || []).slice().reverse() : (e.log || []).slice(-1)).map((l) => `<div class="logline"><span class="logtitle">${esc(STEP_TITLE[l.tool] || 'Update')}</span> <span class="small muted">${esc(new Date(l.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', second: '2-digit' }))}</span><br>${esc(l.say || l.reason)}</div>`).join('')}
         </div>
         ${open ? `<button class="btn ghost" id="divert">We're going to a different hospital</button>
                   <button class="btn tan" id="cancel">Cancel this emergency</button>` : `<button class="btn" id="done">Back to start</button>`}

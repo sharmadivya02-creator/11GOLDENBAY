@@ -50,7 +50,7 @@ function stream(ticket) {
 
 (async () => {
   const srv = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'index.js')], {
-    env: { ...process.env, PORT: String(PORT), DATA_DIR, MOCK_AI: 'true', OFFER_ROUND_SECONDS: '2', COST_HEAD_START_SECONDS: '1', HOSPITAL_DEMO_PIN: '2468', GEMINI_API_KEY: '' },
+    env: { ...process.env, PORT: String(PORT), DATA_DIR, MOCK_AI: 'true', OFFER_ROUND_SECONDS: '2', COST_HEAD_START_SECONDS: '1', HOSPITAL_DEMO_PIN: '2468', GEMINI_API_KEY: '', DEMO_AUTO_ACCEPT_SECONDS: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let srvLog = '';
